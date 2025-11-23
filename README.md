@@ -9,17 +9,28 @@ An MCP (Model Context Protocol) server that provides chat and image analysis cap
 ## Features
 
 - **Text Chat:**
+
   - Direct access to all OpenRouter.ai chat models
   - Support for simple text and multimodal conversations
   - Configurable temperature and other parameters
 
+- **Image Generation:** ✨ NEW
+
+  - Generate images using OpenRouter models (e.g., Google Gemini)
+  - Support for custom aspect ratios (1:1, 16:9, 9:16, etc.)
+  - Optional Cloudinary upload for permanent storage
+  - Automatic retry logic with exponential backoff
+  - Multiple image generation in single request
+
 - **Image Analysis:**
+
   - Analyze single images with custom questions
-  - Process multiple images simultaneously 
+  - Process multiple images simultaneously
   - Automatic image resizing and optimization
   - Support for various image sources (local files, URLs, data URLs)
 
 - **Model Selection:**
+
   - Search and filter available models
   - Validate model IDs
   - Get detailed model information
@@ -33,16 +44,19 @@ An MCP (Model Context Protocol) server that provides chat and image analysis cap
 ## What's New in 1.5.0
 
 - **Improved OS Compatibility:**
+
   - Enhanced path handling for Windows, macOS, and Linux
   - Better support for Windows-style paths with drive letters
   - Normalized path processing for consistent behavior across platforms
 
 - **MCP Configuration Support:**
+
   - Cursor MCP integration without requiring environment variables
   - Direct configuration via MCP parameters
   - Flexible API key and model specification options
 
 - **Robust Error Handling:**
+
   - Improved fallback mechanisms for image processing
   - Better error reporting with specific diagnostics
   - Multiple backup strategies for file reading
@@ -84,10 +98,7 @@ Add one of the following configurations to your MCP settings file (e.g., `cline_
   "mcpServers": {
     "openrouter": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@stabgan/openrouter-mcp-multimodal"
-      ],
+      "args": ["-y", "@stabgan/openrouter-mcp-multimodal"],
       "env": {
         "OPENROUTER_API_KEY": "your-api-key-here",
         "DEFAULT_MODEL": "qwen/qwen2.5-vl-32b-instruct:free"
@@ -104,11 +115,7 @@ Add one of the following configurations to your MCP settings file (e.g., `cline_
   "mcpServers": {
     "openrouter": {
       "command": "uv",
-      "args": [
-        "run",
-        "-m",
-        "openrouter_mcp_multimodal"
-      ],
+      "args": ["run", "-m", "openrouter_mcp_multimodal"],
       "env": {
         "OPENROUTER_API_KEY": "your-api-key-here",
         "DEFAULT_MODEL": "qwen/qwen2.5-vl-32b-instruct:free"
@@ -129,8 +136,10 @@ Add one of the following configurations to your MCP settings file (e.g., `cline_
         "run",
         "--rm",
         "-i",
-        "-e", "OPENROUTER_API_KEY=your-api-key-here",
-        "-e", "DEFAULT_MODEL=qwen/qwen2.5-vl-32b-instruct:free",
+        "-e",
+        "OPENROUTER_API_KEY=your-api-key-here",
+        "-e",
+        "DEFAULT_MODEL=qwen/qwen2.5-vl-32b-instruct:free",
         "stabgandocker/openrouter-mcp-multimodal:latest"
       ]
     }
@@ -145,10 +154,7 @@ Add one of the following configurations to your MCP settings file (e.g., `cline_
   "mcpServers": {
     "openrouter": {
       "command": "smithery",
-      "args": [
-        "run",
-        "stabgan/openrouter-mcp-multimodal"
-      ],
+      "args": ["run", "stabgan/openrouter-mcp-multimodal"],
       "env": {
         "OPENROUTER_API_KEY": "your-api-key-here",
         "DEFAULT_MODEL": "qwen/qwen2.5-vl-32b-instruct:free"
@@ -195,15 +201,15 @@ use_mcp_tool({
     messages: [
       {
         role: "system",
-        content: "You are a helpful assistant."
+        content: "You are a helpful assistant.",
       },
       {
         role: "user",
-        content: "What is the capital of France?"
-      }
+        content: "What is the capital of France?",
+      },
     ],
-    temperature: 0.7 // Optional, defaults to 1.0
-  }
+    temperature: 0.7, // Optional, defaults to 1.0
+  },
 });
 ```
 
@@ -221,17 +227,17 @@ use_mcp_tool({
         content: [
           {
             type: "text",
-            text: "What's in this image?"
+            text: "What's in this image?",
           },
           {
             type: "image_url",
             image_url: {
-              url: "https://example.com/image.jpg"
-            }
-          }
-        ]
-      }
-    ]
-  }
+              url: "https://example.com/image.jpg",
+            },
+          },
+        ],
+      },
+    ],
+  },
 });
 ```
