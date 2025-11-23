@@ -23,6 +23,15 @@ function createMcpProcess() {
     },
   });
 
+  // Ensure stdout doesn't convert buffers to strings
+  if (mcpProcess.stdout) {
+    mcpProcess.stdout.setEncoding("utf8");
+  }
+
+  if (mcpProcess.stderr) {
+    mcpProcess.stderr.setEncoding("utf8");
+  }
+
   mcpProcess.on("error", (error) => {
     console.error("MCP process error:", error);
   });
