@@ -1,0 +1,68 @@
+name: openrouter-mcp-multimodal
+version: 1.0.0
+description: MCP server for OpenRouter providing text chat and image analysis tools
+
+image:
+  name: ghcr.io/stabgan/openrouter-mcp-multimodal
+  tag: latest
+
+entrypoint: ["node", "dist/index.js"]
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      OPENROUTER_API_KEY:
+        type: string
+        description: OpenRouter API key for authentication
+      OPENROUTER_DEFAULT_MODEL:
+        type: string
+        description: Default model to use if none specified in requests
+    required: ["OPENROUTER_API_KEY"]
+  commandFunction: |
+    function getCommand(config) {
+      return {
+        command: "node",
+        args: ["dist/index.js"],
+        env: {
+          OPENROUTER_API_KEY: config.OPENROUTER_API_KEY,
+          OPENROUTER_DEFAULT_MODEL: config.OPENROUTER_DEFAULT_MODEL || "anthropic/claude-3.5-sonnet"
+        }
+      };
+    }
+
+build:
+  dockerfile: Dockerfile
+  dockerBuildPath: "."
+
+publish:
+  smithery: true
+  dockerhub:
+    enabled: true
+    username: stabgan
+    repository: openrouter-mcp-multimodal
+
+config:
+  env:
+    - name: OPENROUTER_API_KEY
+      description: OpenRouter API key for authentication
+      required: true
+    - name: OPENROUTER_DEFAULT_MODEL
+      description: Default model to use if none specified in requests
+      required: false
+      defaultValue: "anthropic/claude-3.5-sonnet"
+
+documentation:
+  description: |
+    An MCP server that provides chat and image analysis capabilities through OpenRouter.ai's diverse model ecosystem.
+    Supports text chat, single and multi-image analysis, and model search/validation.
+  usage: |
+    This MCP server provides the following tools:
+    - chat_completion: Send text or multimodal messages to OpenRouter
+    - analyze_image: Analyze a single image with an optional question
+    - multi_image_analysis: Analyze multiple images with a single prompt
+    - search_models: Search and filter available models
+    - get_model_info: Get detailed information about a specific model
+    - validate_model: Check if a model ID is valid
+  link: https://github.com/stabgan/openrouter-mcp-multimodal
