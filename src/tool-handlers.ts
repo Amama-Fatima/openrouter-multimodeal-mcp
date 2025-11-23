@@ -197,34 +197,12 @@ export class ToolHandlers {
               upload_to_cloudinary: {
                 type: "boolean",
                 description:
-                  "Whether to upload the generated images to Cloudinary (default: false). Requires cloudinary_config.",
+                  "Whether to upload the generated images to Cloudinary (default: false). Requires CLOUDINARY_CLOUD_NAME environment variable.",
               },
               cloudinary_folder: {
                 type: "string",
                 description:
                   'Cloudinary folder to upload images to (default: "ai-generated"). Only used if upload_to_cloudinary is true.',
-              },
-              cloudinary_config: {
-                type: "object",
-                description:
-                  "Cloudinary configuration for uploading images. Required if upload_to_cloudinary is true.",
-                properties: {
-                  cloud_name: {
-                    type: "string",
-                    description: "Cloudinary cloud name (required for upload)",
-                  },
-                  api_key: {
-                    type: "string",
-                    description:
-                      "Cloudinary API key (optional, for signed uploads)",
-                  },
-                  api_secret: {
-                    type: "string",
-                    description:
-                      "Cloudinary API secret (optional, for signed uploads)",
-                  },
-                },
-                required: ["cloud_name"],
               },
             },
             required: ["prompt"],

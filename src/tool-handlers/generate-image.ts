@@ -22,11 +22,6 @@ export interface GenerateImageToolRequest {
   n?: number;
   upload_to_cloudinary?: boolean;
   cloudinary_folder?: string;
-  cloudinary_config?: {
-    cloud_name?: string;
-    api_key?: string;
-    api_secret?: string;
-  };
 }
 
 const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image-preview";
@@ -193,15 +188,18 @@ export async function handleGenerateImage(
     }
 
     // Handle Cloudinary upload if requested
-    if (args.upload_to_cloudinary && args.cloudinary_config) {
-      const { cloud_name, api_key, api_secret } = args.cloudinary_config;
+    if (args.upload_to_cloudinary) {
+      // Load Cloudinary credentials from environment variables
+      const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+      const apiKey = process.env.CLOUDINARY_API_KEY;
+      const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
-      if (!cloud_name) {
+      if (!cloudName) {
         return {
           content: [
             {
               type: "text",
-              text: "Error: Cloudinary cloud_name is required for upload.",
+              text: "Error: CLOUDINARY_CLOUD_NAME environment variable is required for upload. Please set it in your environment or .env file.",
             },
           ],
           isError: true,
@@ -209,9 +207,9 @@ export async function handleGenerateImage(
       }
 
       const cloudinaryConfig: CloudinaryConfig = {
-        cloudName: cloud_name,
-        apiKey: api_key || "",
-        apiSecret: api_secret || "",
+        cloudName: cloudName,
+        apiKey: apiKey || "",
+        apiSecret: apiSecret || "",
       };
 
       console.error(

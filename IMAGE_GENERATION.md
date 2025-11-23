@@ -48,15 +48,12 @@ You can find more image-capable models on the [OpenRouter Models page](https://o
   "arguments": {
     "prompt": "An artistic portrait of a robot reading a book",
     "upload_to_cloudinary": true,
-    "cloudinary_folder": "ai-generated-art",
-    "cloudinary_config": {
-      "cloud_name": "your-cloud-name",
-      "api_key": "your-api-key",
-      "api_secret": "your-api-secret"
-    }
+    "cloudinary_folder": "ai-generated-art"
   }
 }
 ```
+
+**Note:** Cloudinary credentials are loaded from environment variables (see Configuration section below).
 
 ## Parameters
 
@@ -83,14 +80,35 @@ You can find more image-capable models on the [OpenRouter Models page](https://o
 
 - **`n`** (number): Number of images to generate (1-4). Default: 1. Note: some models may not support multiple images.
 
-- **`upload_to_cloudinary`** (boolean): Whether to upload to Cloudinary. Default: false
+- **`upload_to_cloudinary`** (boolean): Whether to upload to Cloudinary. Default: false. Requires `CLOUDINARY_CLOUD_NAME` environment variable.
 
 - **`cloudinary_folder`** (string): Cloudinary folder name. Default: `ai-generated`
 
-- **`cloudinary_config`** (object): Cloudinary credentials (required if `upload_to_cloudinary` is true)
-  - `cloud_name` (string, required): Your Cloudinary cloud name
-  - `api_key` (string, optional): API key for signed uploads
-  - `api_secret` (string, optional): API secret for signed uploads
+## Configuration
+
+### Environment Variables
+
+Set these environment variables in your `.env` file or system environment:
+
+```bash
+# Required for OpenRouter
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# Optional: Default model for image generation
+OPENROUTER_DEFAULT_MODEL=google/gemini-2.5-flash-image-preview
+
+# Required for Cloudinary uploads (if using upload_to_cloudinary)
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key        # Optional, for signed uploads
+CLOUDINARY_API_SECRET=your_api_secret  # Optional, for signed uploads
+```
+
+### Cloudinary Setup
+
+1. Sign up for a free account at [Cloudinary](https://cloudinary.com/)
+2. Get your credentials from the Dashboard
+3. Add them to your `.env` file as shown above
+4. Use `upload_to_cloudinary: true` in your requests
 
 ## Response Format
 
@@ -193,11 +211,17 @@ Common errors and solutions:
 - Use a model with image generation capabilities (check output_modalities)
 - Default to `google/gemini-2.5-flash-image-preview`
 
+### "CLOUDINARY_CLOUD_NAME environment variable is required"
+
+- Set `CLOUDINARY_CLOUD_NAME` in your `.env` file or environment
+- Verify the environment variable is loaded (check with `echo $CLOUDINARY_CLOUD_NAME`)
+- Restart the MCP server after updating environment variables
+
 ### "Cloudinary upload failed"
 
-- Check your credentials (cloud_name, api_key, api_secret)
+- Check your environment variables are set correctly
 - Verify your Cloudinary account is active
-- Check upload preset settings if using unsigned uploads
+- For signed uploads, ensure both API key and secret are provided
 
 ### "Rate limit exceeded"
 
@@ -222,10 +246,7 @@ Common errors and solutions:
     "prompt": "Professional minimalist logo for a tech startup, featuring geometric shapes, modern sans-serif font, navy blue and electric blue color scheme, white background",
     "aspect_ratio": "1:1",
     "upload_to_cloudinary": true,
-    "cloudinary_folder": "logos",
-    "cloudinary_config": {
-      "cloud_name": "mycompany"
-    }
+    "cloudinary_folder": "logos"
   }
 }
 ```
@@ -253,23 +274,10 @@ Common errors and solutions:
     "n": 3,
     "aspect_ratio": "1:1",
     "upload_to_cloudinary": true,
-    "cloudinary_folder": "mascot-variations",
-    "cloudinary_config": {
-      "cloud_name": "mycafe"
-    }
+    "cloudinary_folder": "mascot-variations"
   }
 }
 ```
-
-## Environment Variables
-
-You can set a default model for image generation:
-
-```bash
-export OPENROUTER_DEFAULT_MODEL=google/gemini-2.5-flash-image-preview
-```
-
-This will be used when no model is specified in the request.
 
 ## Limitations
 
