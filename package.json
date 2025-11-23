@@ -43,7 +43,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.17.0",
     "axios": "^1.8.4",
     "dotenv": "^16.4.7",
     "node-fetch": "^3.3.2",
