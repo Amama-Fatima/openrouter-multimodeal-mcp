@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd .. && npm install && npm run build && cd server && npm install"
+
+[deploy]
+startCommand = "node server.js"
+restartPolicyType = "always"
