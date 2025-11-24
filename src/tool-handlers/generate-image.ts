@@ -24,7 +24,7 @@ export interface GenerateImageToolRequest {
   cloudinary_folder?: string;
 }
 
-const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1-schnell-free";
 
 /**
  * Retry helper with exponential backoff
@@ -96,112 +96,90 @@ export async function handleGenerateImage(
       }"`
     );
 
-    // Determine if this is a FLUX model (uses Images API) or Gemini (uses Chat API)
-    const isFluxModel = model.toLowerCase().includes("flux");
+    // OpenRouter uses Chat Completions API for ALL models (including FLUX)
+    console.error(`[generate-image] Using Chat Completions API for ${model}`);
 
-    let images: any[] = [];
-
-    if (isFluxModel) {
-      // FLUX models use the Images API
-      console.error(`[generate-image] Using Images API for FLUX model`);
-
-      const imageParams: any = {
-        model: model,
-        prompt: args.prompt,
-        n: 1,
-      };
-
-      // Add size/aspect_ratio if specified
-      if (args.aspect_ratio) {
-        // Map aspect ratios to sizes supported by FLUX
-        const sizeMap: Record<string, string> = {
-          "1:1": "1024x1024",
-          "16:9": "1344x768",
-          "9:16": "768x1344",
-          "4:3": "1152x896",
-          "3:4": "896x1152",
-        };
-        imageParams.size = sizeMap[args.aspect_ratio] || "1024x1024";
-        console.error(`[generate-image] Using size: ${imageParams.size}`);
-      }
-
-      const result = await retryWithBackoff(
-        async () => {
-          const response = await openai.images.generate(imageParams);
-          return response;
+    const requestParams: any = {
+      model: model,
+      messages: [
+        {
+          role: "user",
+          content: args.prompt,
         },
-        3,
-        3000,
-        "OpenRouter FLUX Image Generation"
-      );
+      ],
+      modalities: ["image", "text"], // Required for image generation
+    };
 
-      // Extract images from FLUX response
-      images =
-        result.data?.map((img: any) => ({
-          image_url: {
-            url:
-              img.url || img.b64_json
-                ? `data:image/png;base64,${img.b64_json}`
-                : null,
-          },
-        })) || [];
-    } else {
-      // Gemini and other models use Chat Completions API
-      console.error(`[generate-image] Using Chat Completions API for ${model}`);
-
-      const requestParams: any = {
-        model: model,
-        messages: [
-          {
-            role: "user",
-            content: args.prompt,
-          },
-        ],
-        modalities: ["image", "text"],
-        stream: false,
+    // Add size for FLUX models
+    if (args.aspect_ratio && model.toLowerCase().includes("flux")) {
+      const sizeMap: Record<string, string> = {
+        "1:1": "1024x1024",
+        "16:9": "1344x768",
+        "9:16": "768x1344",
+        "21:9": "1536x640",
+        "9:21": "640x1536",
+        "4:3": "1152x896",
+        "3:4": "896x1152",
+        "4:5": "896x1088",
+        "5:4": "1088x896",
+        "2:3": "832x1216",
+        "3:2": "1216x832",
       };
-
-      // Add image configuration if aspect_ratio is specified (for Gemini models)
-      if (args.aspect_ratio && model.includes("gemini")) {
-        requestParams.image_config = {
-          aspect_ratio: args.aspect_ratio,
-        };
-        console.error(
-          `[generate-image] Using aspect ratio: ${args.aspect_ratio}`
-        );
-      }
-
-      // Generate the image with retry logic
-      const result = await retryWithBackoff(
-        async () => {
-          const completion = await openai.chat.completions.create(
-            requestParams
-          );
-          return completion;
-        },
-        3,
-        3000,
-        "OpenRouter Image Generation"
-      );
-
-      // Extract images from chat response
-      const message = result.choices?.[0]?.message;
-      if (!message) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: No response message from the model.",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      images = (message as any).images || [];
+      requestParams.size = sizeMap[args.aspect_ratio] || "1024x1024";
+      console.error(`[generate-image] Using size: ${requestParams.size}`);
     }
 
-    console.error("[generate-image] Image generation successful");
+    // Add image_config for Gemini models
+    if (model.toLowerCase().includes("gemini") && args.aspect_ratio) {
+      requestParams.image_config = {
+        aspect_ratio: args.aspect_ratio,
+      };
+      console.error(
+        `[generate-image] Using aspect ratio: ${args.aspect_ratio}`
+      );
+    }
+
+    // Generate the image with retry logic
+    const result = await retryWithBackoff(
+      async () => {
+        const completion = await openai.chat.completions.create(requestParams);
+        return completion;
+      },
+      3,
+      3000,
+      "OpenRouter Image Generation"
+    );
+
+    // Extract images from the response
+    // According to OpenRouter docs, images are in message.images array
+    const message = result.choices?.[0]?.message;
+    if (!message) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: No response message from the model.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    console.error("[generate-image] Response received, checking for images...");
+
+    // OpenRouter returns images in message.images array
+    // Format: { type: "image_url", image_url: { url: "data:image/png;base64,..." } }
+    const images = (message as any).images || [];
+
+    // Also log the message content if available
+    if (message.content) {
+      console.error(
+        `[generate-image] Message content: ${message.content.substring(
+          0,
+          100
+        )}...`
+      );
+    }
 
     // Check if images were generated
     if (!images || images.length === 0) {
@@ -209,7 +187,9 @@ export async function handleGenerateImage(
         content: [
           {
             type: "text",
-            text: `The model responded but did not generate images. Please ensure the model supports image generation.`,
+            text: `The model responded but did not generate images.\n\nMessage: ${
+              message.content || "No content"
+            }\n\nPlease ensure:\n1. The model supports image generation (check output_modalities)\n2. Your prompt requests image generation\n3. The model ID is correct`,
           },
         ],
         isError: true,
@@ -218,11 +198,16 @@ export async function handleGenerateImage(
 
     console.error(`[generate-image] Generated ${images.length} image(s)`);
 
-    // Extract base64 image URLs
+    // Extract base64 image URLs from OpenRouter's response format
     const base64Images: string[] = images
       .map((img: any) => {
+        // OpenRouter format: { type: "image_url", image_url: { url: "..." } }
         if (img.image_url && img.image_url.url) {
           return img.image_url.url;
+        }
+        // Fallback for other possible formats
+        if (img.url) {
+          return img.url;
         }
         return null;
       })
@@ -233,12 +218,16 @@ export async function handleGenerateImage(
         content: [
           {
             type: "text",
-            text: "Error: No valid image URLs found in the response.",
+            text: "Error: No valid image URLs found in the response. Image format may not be supported.",
           },
         ],
         isError: true,
       };
     }
+
+    console.error(
+      `[generate-image] Successfully extracted ${base64Images.length} image URL(s)`
+    );
 
     // Handle Cloudinary upload if requested
     if (args.upload_to_cloudinary) {
