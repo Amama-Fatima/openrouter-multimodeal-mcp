@@ -340,7 +340,17 @@ export async function handleGenerateImage(
       );
 
       // Build response with ONLY Cloudinary URLs (no base64)
-      const responseContent = [
+      const responseContent: Array<{
+        type: "text" | "image" | "resource";
+        text?: string;
+        data?: string;
+        mimeType?: string;
+        resource?: {
+          uri: string;
+          mimeType: string;
+          text?: string;
+        };
+      }> = [
         {
           type: "text",
           text: `✅ Successfully generated ${
@@ -368,16 +378,11 @@ export async function handleGenerateImage(
           }\n💾 Bytes: ${result.bytes.toLocaleString()}`,
         });
 
-        // Include the image as a resource (using Cloudinary URL, not base64)
+        // Include the image as embedded image (using Cloudinary URL)
         responseContent.push({
-          type: "resource",
-          resource: {
-            uri: result.secure_url,
-            mimeType: `image/${result.format}`,
-            text: `Image ${index + 1}: ${args.prompt.substring(0, 50)}${
-              args.prompt.length > 50 ? "..." : ""
-            }`,
-          },
+          type: "image" as const,
+          data: result.secure_url,
+          mimeType: `image/${result.format}`,
         } as any);
       });
 

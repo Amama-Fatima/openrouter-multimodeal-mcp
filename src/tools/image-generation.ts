@@ -47,10 +47,7 @@ export function registerImageGenerationTools(
           openai,
           defaultImageModel
         );
-        return {
-          ...result,
-          content: result.content.map((c) => ({ ...c, type: "text" as const })),
-        };
+        return result as any;
       } catch (error: any) {
         return {
           content: [
