@@ -41,31 +41,52 @@ export async function uploadToCloudinary(
 
   const formData = new URLSearchParams();
   formData.append("file", base64Image);
-  formData.append("upload_preset", "ml_default"); // You can use an unsigned preset or sign the request
-  formData.append("folder", folder);
-  formData.append("tags", tags.join(","));
 
-  if (public_id) {
-    formData.append("public_id", public_id);
-  }
-
-  // If API key and secret are provided, add them for signed uploads
+  // If API key and secret are provided, use signed uploads
   if (config.apiKey && config.apiSecret) {
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    formData.append("timestamp", timestamp);
-    formData.append("api_key", config.apiKey);
 
-    // For signed uploads, you'd need to generate a signature
-    // This is a simplified version - in production, generate proper signature
+    // Build params for signature (alphabetically sorted, no upload_preset)
+    const signatureParams: Record<string, string> = {
+      folder: folder,
+      tags: tags.join(","),
+      timestamp: timestamp,
+    };
+
+    if (public_id) {
+      signatureParams.public_id = public_id;
+    }
+
+    // Sort parameters alphabetically and create signature string
+    const sortedParams = Object.keys(signatureParams)
+      .sort()
+      .map((key) => `${key}=${signatureParams[key]}`)
+      .join("&");
+
+    // Generate signature: sorted_params + api_secret
     const crypto = await import("crypto");
-    const paramsToSign = `folder=${folder}&tags=${tags.join(
-      ","
-    )}&timestamp=${timestamp}${config.apiSecret}`;
     const signature = crypto
       .createHash("sha1")
-      .update(paramsToSign)
+      .update(sortedParams + config.apiSecret)
       .digest("hex");
+
+    // Add signed upload parameters
+    formData.append("folder", folder);
+    formData.append("tags", tags.join(","));
+    if (public_id) {
+      formData.append("public_id", public_id);
+    }
+    formData.append("timestamp", timestamp);
+    formData.append("api_key", config.apiKey);
     formData.append("signature", signature);
+  } else {
+    // Unsigned upload using preset
+    formData.append("upload_preset", "ml_default");
+    formData.append("folder", folder);
+    formData.append("tags", tags.join(","));
+    if (public_id) {
+      formData.append("public_id", public_id);
+    }
   }
 
   try {
