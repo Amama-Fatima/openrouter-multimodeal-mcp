@@ -67,15 +67,30 @@ export async function handleGenerateImage(
 ) {
   const args = request.params.arguments;
 
-  console.error("╔════════════════════════════════════════════════════════════════╗");
-  console.error("║       [generate-image] START IMAGE GENERATION                  ║");
-  console.error("╚════════════════════════════════════════════════════════════════╝");
-  console.error("[generate-image] 📝 Request args:", JSON.stringify(args, null, 2));
+  console.error(
+    "╔════════════════════════════════════════════════════════════════╗"
+  );
+  console.error(
+    "║       [generate-image] START IMAGE GENERATION                  ║"
+  );
+  console.error(
+    "╚════════════════════════════════════════════════════════════════╝"
+  );
+  console.error(
+    "[generate-image] 📝 Request args:",
+    JSON.stringify(args, null, 2)
+  );
   console.error("[generate-image] 🤖 Default model:", defaultModel);
   console.error("[generate-image] 🌥️  Cloudinary env check:", {
-    CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME ? "✅ SET" : "❌ NOT SET",
-    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? "✅ SET" : "❌ NOT SET",
-    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? "✅ SET" : "❌ NOT SET"
+    CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME
+      ? "✅ SET"
+      : "❌ NOT SET",
+    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY
+      ? "✅ SET"
+      : "❌ NOT SET",
+    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET
+      ? "✅ SET"
+      : "❌ NOT SET",
   });
 
   // Validate prompt
@@ -95,11 +110,19 @@ export async function handleGenerateImage(
   try {
     const model = args.model || defaultModel || DEFAULT_IMAGE_MODEL;
 
-    console.error(`[generate-image] 🎨 Starting image generation with model: ${model}`);
-    console.error(`[generate-image] 💬 Prompt: "${args.prompt.substring(0, 100)}${args.prompt.length > 100 ? '...' : ''}"`);
+    console.error(
+      `[generate-image] 🎨 Starting image generation with model: ${model}`
+    );
+    console.error(
+      `[generate-image] 💬 Prompt: "${args.prompt.substring(0, 100)}${
+        args.prompt.length > 100 ? "..." : ""
+      }"`
+    );
 
     // OpenRouter uses Chat Completions API for ALL image generation models
-    console.error(`[generate-image] 🔄 Using Chat Completions API for ${model}`);
+    console.error(
+      `[generate-image] 🔄 Using Chat Completions API for ${model}`
+    );
 
     const requestParams: any = {
       model: model,
@@ -117,7 +140,9 @@ export async function handleGenerateImage(
       requestParams.image_config = {
         aspect_ratio: args.aspect_ratio,
       };
-      console.error(`[generate-image] 📐 Using aspect ratio: ${args.aspect_ratio}`);
+      console.error(
+        `[generate-image] 📐 Using aspect ratio: ${args.aspect_ratio}`
+      );
     }
 
     // Generate the image with retry logic
@@ -134,7 +159,9 @@ export async function handleGenerateImage(
 
     const message = result.choices?.[0]?.message;
     if (!message) {
-      console.error("[generate-image] ❌ ERROR: No response message from model");
+      console.error(
+        "[generate-image] ❌ ERROR: No response message from model"
+      );
       return {
         content: [
           {
@@ -146,18 +173,30 @@ export async function handleGenerateImage(
       };
     }
 
-    console.error("[generate-image] ✅ Response received, checking for images...");
+    console.error(
+      "[generate-image] ✅ Response received, checking for images..."
+    );
     console.error("[generate-image] 🔍 Message keys:", Object.keys(message));
-    console.error("[generate-image] 📊 Message content type:", typeof message.content);
+    console.error(
+      "[generate-image] 📊 Message content type:",
+      typeof message.content
+    );
 
     // OpenRouter returns images in message.images array
     const images = (message as any).images || [];
     console.error("[generate-image] 🖼️  Images array length:", images.length);
-    console.error("[generate-image] 🗂️  Images data:", JSON.stringify(images).substring(0, 500));
+    console.error(
+      "[generate-image] 🗂️  Images data:",
+      JSON.stringify(images).substring(0, 500)
+    );
 
     // Also log the message content if available
     if (message.content) {
-      console.error(`[generate-image] 💬 Message content: ${message.content.toString().substring(0, 100)}...`);
+      console.error(
+        `[generate-image] 💬 Message content: ${message.content
+          .toString()
+          .substring(0, 100)}...`
+      );
     }
 
     // Check if images were generated
@@ -182,10 +221,15 @@ export async function handleGenerateImage(
     console.error("[generate-image] 🔄 Starting base64 extraction...");
     const base64Images: string[] = images
       .map((img: any, index: number) => {
-        console.error(`[generate-image] 📦 Processing image ${index + 1}:`, JSON.stringify(img).substring(0, 200));
+        console.error(
+          `[generate-image] 📦 Processing image ${index + 1}:`,
+          JSON.stringify(img).substring(0, 200)
+        );
         // OpenRouter format: { type: "image_url", image_url: { url: "..." } }
         if (img.image_url && img.image_url.url) {
-          console.error(`[generate-image] ✅ Found image_url.url for image ${index + 1}`);
+          console.error(
+            `[generate-image] ✅ Found image_url.url for image ${index + 1}`
+          );
           return img.image_url.url;
         }
         // Fallback for other possible formats
@@ -193,15 +237,21 @@ export async function handleGenerateImage(
           console.error(`[generate-image] ✅ Found url for image ${index + 1}`);
           return img.url;
         }
-        console.error(`[generate-image] ❌ No valid format found for image ${index + 1}`);
+        console.error(
+          `[generate-image] ❌ No valid format found for image ${index + 1}`
+        );
         return null;
       })
       .filter((url: string | null): url is string => url !== null);
 
-    console.error(`[generate-image] ✅ Extracted ${base64Images.length} base64 image(s)`);
+    console.error(
+      `[generate-image] ✅ Extracted ${base64Images.length} base64 image(s)`
+    );
 
     if (base64Images.length === 0) {
-      console.error("[generate-image] ❌ FATAL: No valid base64 images extracted!");
+      console.error(
+        "[generate-image] ❌ FATAL: No valid base64 images extracted!"
+      );
       return {
         content: [
           {
@@ -216,10 +266,16 @@ export async function handleGenerateImage(
     // ========================================================================
     // CLOUDINARY UPLOAD - ALWAYS ENABLED
     // ========================================================================
-    console.error("[generate-image] ╔════════════════════════════════════════════════════════════════╗");
-    console.error("[generate-image] ║            🌥️  CLOUDINARY UPLOAD (ALWAYS ENABLED)              ║");
-    console.error("[generate-image] ╚════════════════════════════════════════════════════════════════╝");
-    
+    console.error(
+      "[generate-image] ╔════════════════════════════════════════════════════════════════╗"
+    );
+    console.error(
+      "[generate-image] ║            🌥️  CLOUDINARY UPLOAD (ALWAYS ENABLED)              ║"
+    );
+    console.error(
+      "[generate-image] ╚════════════════════════════════════════════════════════════════╝"
+    );
+
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
     const apiKey = process.env.CLOUDINARY_API_KEY;
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
@@ -227,11 +283,13 @@ export async function handleGenerateImage(
     console.error("[generate-image] 🔐 Cloudinary credentials:", {
       cloudName: cloudName || "❌ MISSING",
       apiKey: apiKey ? "✅ SET" : "❌ MISSING",
-      apiSecret: apiSecret ? "✅ SET" : "❌ MISSING"
+      apiSecret: apiSecret ? "✅ SET" : "❌ MISSING",
     });
 
     if (!cloudName) {
-      console.error("[generate-image] ❌ FATAL: CLOUDINARY_CLOUD_NAME is required!");
+      console.error(
+        "[generate-image] ❌ FATAL: CLOUDINARY_CLOUD_NAME is required!"
+      );
       return {
         content: [
           {
@@ -251,10 +309,14 @@ export async function handleGenerateImage(
 
     const folderName = args.cloudinary_folder || "ai-generated";
     console.error(`[generate-image] 📁 Upload folder: ${folderName}`);
-    console.error(`[generate-image] 📦 Uploading ${base64Images.length} image(s)...`);
+    console.error(
+      `[generate-image] 📦 Uploading ${base64Images.length} image(s)...`
+    );
 
     try {
-      console.error("[generate-image] 🚀 Calling uploadMultipleToCloudinary with retry...");
+      console.error(
+        "[generate-image] 🚀 Calling uploadMultipleToCloudinary with retry..."
+      );
       const uploadResults = await retryCloudinaryUpload(
         async () =>
           await uploadMultipleToCloudinary(base64Images, cloudinaryConfig, {
@@ -267,18 +329,29 @@ export async function handleGenerateImage(
       );
 
       console.error("[generate-image] ✅ SUCCESS: Cloudinary upload complete!");
-      console.error("[generate-image] 📊 Upload results:", uploadResults.map(r => ({
-        public_id: r.public_id,
-        url: r.secure_url.substring(0, 80) + "...",
-        format: r.format,
-        size: `${r.width}x${r.height}`
-      })));
+      console.error(
+        "[generate-image] 📊 Upload results:",
+        uploadResults.map((r) => ({
+          public_id: r.public_id,
+          url: r.secure_url.substring(0, 80) + "...",
+          format: r.format,
+          size: `${r.width}x${r.height}`,
+        }))
+      );
 
       // Build response with ONLY Cloudinary URLs (no base64)
       const responseContent = [
         {
           type: "text",
-          text: `✅ Successfully generated ${uploadResults.length} image(s) and uploaded to Cloudinary!\n\n📝 **Prompt:** "${args.prompt}"\n🤖 **Model:** ${model}${args.aspect_ratio ? `\n📐 **Aspect Ratio:** ${args.aspect_ratio}` : ""}\n`,
+          text: `✅ Successfully generated ${
+            uploadResults.length
+          } image(s) and uploaded to Cloudinary!\n\n📝 **Prompt:** "${
+            args.prompt
+          }"\n🤖 **Model:** ${model}${
+            args.aspect_ratio
+              ? `\n📐 **Aspect Ratio:** ${args.aspect_ratio}`
+              : ""
+          }\n`,
         },
       ];
 
@@ -286,7 +359,13 @@ export async function handleGenerateImage(
       uploadResults.forEach((result, index) => {
         responseContent.push({
           type: "text",
-          text: `\n🖼️ **Image ${index + 1}:**\n🔗 URL: ${result.secure_url}\n🆔 Public ID: ${result.public_id}\n📦 Format: ${result.format}\n📏 Size: ${result.width}x${result.height}\n💾 Bytes: ${result.bytes.toLocaleString()}`,
+          text: `\n🖼️ **Image ${index + 1}:**\n🔗 URL: ${
+            result.secure_url
+          }\n🆔 Public ID: ${result.public_id}\n📦 Format: ${
+            result.format
+          }\n📏 Size: ${result.width}x${
+            result.height
+          }\n💾 Bytes: ${result.bytes.toLocaleString()}`,
         });
 
         // Include the image as a resource (using Cloudinary URL, not base64)
@@ -295,48 +374,73 @@ export async function handleGenerateImage(
           resource: {
             uri: result.secure_url,
             mimeType: `image/${result.format}`,
-            text: `Image ${index + 1}: ${args.prompt.substring(0, 50)}${args.prompt.length > 50 ? '...' : ''}`
-          }
+            text: `Image ${index + 1}: ${args.prompt.substring(0, 50)}${
+              args.prompt.length > 50 ? "..." : ""
+            }`,
+          },
         } as any);
       });
 
-      console.error("[generate-image] ╔════════════════════════════════════════════════════════════════╗");
-      console.error("[generate-image] ║              ✅ SUCCESS - RETURNING CLOUDINARY URLS            ║");
-      console.error("[generate-image] ╚════════════════════════════════════════════════════════════════╝");
+      console.error(
+        "[generate-image] ╔════════════════════════════════════════════════════════════════╗"
+      );
+      console.error(
+        "[generate-image] ║              ✅ SUCCESS - RETURNING CLOUDINARY URLS            ║"
+      );
+      console.error(
+        "[generate-image] ╚════════════════════════════════════════════════════════════════╝"
+      );
       return { content: responseContent };
-
     } catch (cloudinaryError: any) {
-      console.error("[generate-image] ╔════════════════════════════════════════════════════════════════╗");
-      console.error("[generate-image] ║            ❌ CLOUDINARY UPLOAD FAILED                         ║");
-      console.error("[generate-image] ╚════════════════════════════════════════════════════════════════╝");
+      console.error(
+        "[generate-image] ╔════════════════════════════════════════════════════════════════╗"
+      );
+      console.error(
+        "[generate-image] ║            ❌ CLOUDINARY UPLOAD FAILED                         ║"
+      );
+      console.error(
+        "[generate-image] ╚════════════════════════════════════════════════════════════════╝"
+      );
       console.error("[generate-image] 🔥 Error:", cloudinaryError);
       console.error("[generate-image] 🔍 Error details:", {
         message: cloudinaryError.message,
-        stack: cloudinaryError.stack?.split('\n').slice(0, 5),
+        stack: cloudinaryError.stack?.split("\n").slice(0, 5),
         code: cloudinaryError.code,
-        statusCode: cloudinaryError.statusCode
+        statusCode: cloudinaryError.statusCode,
       });
 
       return {
         content: [
           {
             type: "text",
-            text: `❌ Image generation succeeded, but Cloudinary upload FAILED.\n\n🔴 **Error:** ${cloudinaryError.message}\n\n📝 **Prompt:** "${args.prompt}"\n🤖 **Model:** ${model}\n\n⚠️ Please check your Cloudinary credentials in Railway environment variables:\n- CLOUDINARY_CLOUD_NAME\n- CLOUDINARY_API_KEY\n- CLOUDINARY_API_SECRET\n\n🔧 Debug: ${cloudinaryError.stack?.split('\n')[0] || 'No stack trace available'}`,
+            text: `❌ Image generation succeeded, but Cloudinary upload FAILED.\n\n🔴 **Error:** ${
+              cloudinaryError.message
+            }\n\n📝 **Prompt:** "${
+              args.prompt
+            }"\n🤖 **Model:** ${model}\n\n⚠️ Please check your Cloudinary credentials in Railway environment variables:\n- CLOUDINARY_CLOUD_NAME\n- CLOUDINARY_API_KEY\n- CLOUDINARY_API_SECRET\n\n🔧 Debug: ${
+              cloudinaryError.stack?.split("\n")[0] ||
+              "No stack trace available"
+            }`,
           },
         ],
         isError: true,
       };
     }
-
   } catch (error: any) {
-    console.error("[generate-image] ╔════════════════════════════════════════════════════════════════╗");
-    console.error("[generate-image] ║              ❌ FATAL ERROR                                    ║");
-    console.error("[generate-image] ╚════════════════════════════════════════════════════════════════╝");
+    console.error(
+      "[generate-image] ╔════════════════════════════════════════════════════════════════╗"
+    );
+    console.error(
+      "[generate-image] ║              ❌ FATAL ERROR                                    ║"
+    );
+    console.error(
+      "[generate-image] ╚════════════════════════════════════════════════════════════════╝"
+    );
     console.error("[generate-image] 🔥 Error details:", {
       message: error.message,
       code: error.code,
       status: error.status,
-      stack: error.stack?.split('\n').slice(0, 10),
+      stack: error.stack?.split("\n").slice(0, 10),
     });
 
     // Build error message with helpful context
