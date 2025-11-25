@@ -1,8 +1,7 @@
 import OpenAI from "openai";
 import {
+  uploadToCloudinary,
   uploadMultipleToCloudinary,
-  retryCloudinaryUpload,
-  CloudinaryConfig,
 } from "../utils/cloudinary.js";
 
 export interface GenerateImageToolRequest {
@@ -20,41 +19,31 @@ export interface GenerateImageToolRequest {
     | "16:9"
     | "21:9";
   n?: number;
-  upload_to_cloudinary?: boolean;
   cloudinary_folder?: string;
 }
 
 const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 /**
- * Retry helper with exponential backoff
+ * Extract base64 from data URI
  */
-async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 2, // Reduced from 3
-  initialDelay: number = 2000, // Reduced from 3000
-  operationName: string = "Operation"
-): Promise<T> {
-  let lastError: Error | undefined;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      lastError = error;
-      if (attempt < maxRetries - 1) {
-        const delay = initialDelay * Math.pow(1.5, attempt); // Reduced exponential factor
-        console.error(
-          `${operationName} attempt ${
-            attempt + 1
-          } failed, retrying in ${delay}ms...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
+function extractBase64(dataUri: string): string {
+  if (dataUri.startsWith("data:")) {
+    const parts = dataUri.split(",");
+    return parts[1];
   }
+  return dataUri;
+}
 
-  throw lastError || new Error(`${operationName} failed after all retries`);
+/**
+ * Extract mime type from data URI
+ */
+function extractMimeType(dataUri: string): string {
+  if (dataUri.startsWith("data:")) {
+    const match = dataUri.match(/data:([^;]+);/);
+    return match ? match[1] : "image/png";
+  }
+  return "image/png";
 }
 
 /**
@@ -71,22 +60,11 @@ export async function handleGenerateImage(
   console.error(
     `[generate-image] 📝 Prompt: ${args.prompt.substring(0, 100)}...`
   );
-  console.error(
-    `[generate-image] 🤖 Model: ${
-      args.model || defaultModel || DEFAULT_IMAGE_MODEL
-    }`
-  );
 
   // Validate prompt
   if (!args.prompt || args.prompt.trim().length === 0) {
-    console.error("[generate-image] ❌ ERROR: Empty prompt");
     return {
-      content: [
-        {
-          type: "text",
-          text: "Error: Prompt cannot be empty.",
-        },
-      ],
+      content: [{ type: "text", text: "Error: Prompt cannot be empty." }],
       isError: true,
     };
   }
@@ -97,62 +75,42 @@ export async function handleGenerateImage(
     // OpenRouter uses Chat Completions API for image generation
     const requestParams: any = {
       model: model,
-      messages: [
-        {
-          role: "user",
-          content: args.prompt,
-        },
-      ],
+      messages: [{ role: "user", content: args.prompt }],
       modalities: ["image", "text"],
     };
 
     // Add image_config for Gemini models
     if (model.toLowerCase().includes("gemini") && args.aspect_ratio) {
-      requestParams.image_config = {
-        aspect_ratio: args.aspect_ratio,
-      };
-      console.error(`[generate-image] 📐 Aspect ratio: ${args.aspect_ratio}`);
+      requestParams.image_config = { aspect_ratio: args.aspect_ratio };
     }
 
-    // Generate the image with reduced retries
+    // Generate the image
     console.error("[generate-image] 🚀 Calling OpenRouter...");
-    const result = await retryWithBackoff(
-      async () => {
-        const completion = await openai.chat.completions.create(requestParams);
-        return completion;
-      },
-      2, // Reduced retries
-      2000, // Reduced initial delay
-      "OpenRouter Image Generation"
-    );
+    const startTime = Date.now();
+
+    const result = await openai.chat.completions.create(requestParams);
+
+    const generationTime = Date.now() - startTime;
+    console.error(`[generate-image] ✅ Image generated in ${generationTime}ms`);
 
     const message = result.choices?.[0]?.message;
     if (!message) {
-      console.error("[generate-image] ❌ No response message");
       return {
-        content: [
-          {
-            type: "text",
-            text: "Error: No response message from the model.",
-          },
-        ],
+        content: [{ type: "text", text: "Error: No response from model." }],
         isError: true,
       };
     }
-
-    console.error("[generate-image] ✅ Response received");
 
     // Extract images from OpenRouter response
     const images = (message as any).images || [];
     console.error(`[generate-image] 🖼️  Found ${images.length} image(s)`);
 
     if (!images || images.length === 0) {
-      console.error("[generate-image] ❌ No images in response");
       return {
         content: [
           {
             type: "text",
-            text: `The model responded but did not generate images. Message: ${
+            text: `Model did not generate images. Message: ${
               message.content || "No content"
             }`,
           },
@@ -162,176 +120,142 @@ export async function handleGenerateImage(
     }
 
     // Extract base64 image URLs
-    const base64Images: string[] = images
+    const base64DataUris: string[] = images
       .map((img: any) => {
-        if (img.image_url && img.image_url.url) {
-          return img.image_url.url;
-        }
-        if (img.url) {
-          return img.url;
-        }
+        if (img.image_url?.url) return img.image_url.url;
+        if (img.url) return img.url;
         return null;
       })
       .filter((url: string | null): url is string => url !== null);
 
-    console.error(
-      `[generate-image] ✅ Extracted ${base64Images.length} base64 image(s)`
-    );
-
-    if (base64Images.length === 0) {
-      console.error("[generate-image] ❌ No valid base64 images");
+    if (base64DataUris.length === 0) {
       return {
-        content: [
-          {
-            type: "text",
-            text: "Error: No valid image URLs found in the response.",
-          },
-        ],
+        content: [{ type: "text", text: "Error: No valid images found." }],
         isError: true,
       };
     }
 
-    // Upload to Cloudinary (always enabled)
+    // Prepare images for upload - extract base64 and mime type
+    const imagesToUpload = base64DataUris.map((dataUri) => ({
+      base64: extractBase64(dataUri),
+      mimeType: extractMimeType(dataUri),
+    }));
+
+    // Upload to Cloudinary using the SDK function
     console.error("[generate-image] 🌥️  Uploading to Cloudinary...");
 
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const folderName = args.cloudinary_folder || "ai-generated";
+    const uploadResults = await uploadMultipleToCloudinary(imagesToUpload, {
+      folder: folderName,
+      tags: ["ai-generated", "openrouter", model.split("/")[0]],
+      prompt: args.prompt,
+    });
 
-    if (!cloudName) {
-      console.error("[generate-image] ❌ CLOUDINARY_CLOUD_NAME missing");
+    const uploadTime = Date.now() - startTime - generationTime;
+    console.error(
+      `[generate-image] ✅ Cloudinary upload complete in ${uploadTime}ms`
+    );
+
+    // Check if any uploads failed
+    const successfulUploads = uploadResults.filter((r) => r.success);
+    const failedUploads = uploadResults.filter((r) => !r.success);
+
+    if (failedUploads.length > 0) {
+      console.error(
+        `[generate-image] ⚠️  ${failedUploads.length} upload(s) failed`
+      );
+    }
+
+    if (successfulUploads.length === 0) {
       return {
         content: [
           {
             type: "text",
-            text: "❌ Error: CLOUDINARY_CLOUD_NAME environment variable is required.",
+            text: `❌ All Cloudinary uploads failed.\n\nErrors: ${failedUploads
+              .map((r) => r.error)
+              .join(", ")}`,
           },
         ],
         isError: true,
       };
     }
 
-    const cloudinaryConfig: CloudinaryConfig = {
-      cloudName: cloudName,
-      apiKey: apiKey || "",
-      apiSecret: apiSecret || "",
-    };
+    // Build response with Cloudinary URLs AND base64 images
+    const responseContent: Array<{
+      type: "text" | "image";
+      text?: string;
+      data?: string;
+      mimeType?: string;
+    }> = [
+      {
+        type: "text",
+        text: `✅ Generated ${
+          successfulUploads.length
+        } image(s) and uploaded to Cloudinary!\n\n📝 Prompt: "${
+          args.prompt
+        }"\n🤖 Model: ${model}${
+          args.aspect_ratio ? `\n📐 Aspect Ratio: ${args.aspect_ratio}` : ""
+        }\n\n⏱️  Generation: ${generationTime}ms | Upload: ${uploadTime}ms\n`,
+      },
+    ];
 
-    const folderName = args.cloudinary_folder || "ai-generated";
-
-    try {
-      const uploadResults = await retryCloudinaryUpload(
-        async () =>
-          await uploadMultipleToCloudinary(base64Images, cloudinaryConfig, {
-            folder: folderName,
-            tags: ["ai-generated", "openrouter", model.split("/")[0]],
-            prompt: args.prompt,
-          }),
-        2, // Reduced retries
-        1500 // Reduced delay
-      );
-
-      console.error("[generate-image] ✅ Cloudinary upload complete!");
-
-      // Build response with ONLY text and Cloudinary URLs (no base64)
-      const responseContent: Array<{
-        type: "text" | "image";
-        text?: string;
-        data?: string;
-        mimeType?: string;
-      }> = [
-        {
-          type: "text",
-          text: `✅ Generated ${
-            uploadResults.length
-          } image(s) and uploaded to Cloudinary!\n\n📝 Prompt: "${
-            args.prompt
-          }"\n🤖 Model: ${model}${
-            args.aspect_ratio ? `\n📐 Aspect Ratio: ${args.aspect_ratio}` : ""
-          }\n`,
-        },
-      ];
-
-      // Add each image with its metadata
-      uploadResults.forEach((result, index) => {
-        // Add metadata as text
-        responseContent.push({
-          type: "text",
-          text: `\n🖼️ Image ${index + 1}:\n🔗 ${result.secure_url}\n📦 ${
-            result.format
-          } | 📏 ${result.width}x${
-            result.height
-          } | 💾 ${result.bytes.toLocaleString()} bytes`,
-        });
-
-        // Add image using Cloudinary URL (NOT base64)
-        responseContent.push({
-          type: "image",
-          data: result.secure_url,
-          mimeType: `image/${result.format}`,
-        });
+    // Add images with both Cloudinary URLs and embedded base64
+    successfulUploads.forEach((result, index) => {
+      // Add metadata
+      responseContent.push({
+        type: "text",
+        text: `\n🖼️  Image ${index + 1}:\n🔗 ${result.secure_url}\n📦 ${
+          result.format
+        } | 📏 ${result.width}x${result.height} | 💾 ${
+          result.bytes?.toLocaleString() || "N/A"
+        } bytes`,
       });
 
-      console.error(
-        "[generate-image] ✅ Response prepared, returning to Claude"
-      );
+      // Add the actual image using Cloudinary URL (faster to load)
+      responseContent.push({
+        type: "image",
+        data: result.secure_url || result.url!,
+        mimeType: `image/${result.format}`,
+      });
+    });
 
-      // Return with proper MCP format
-      return {
-        content: responseContent,
-        isError: false,
-      };
-    } catch (cloudinaryError: any) {
-      console.error(
-        "[generate-image] ❌ Cloudinary upload failed:",
-        cloudinaryError.message
-      );
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `❌ Image generation succeeded, but Cloudinary upload failed.\n\n🔴 Error: ${cloudinaryError.message}\n\n📝 Prompt: "${args.prompt}"\n🤖 Model: ${model}\n\n⚠️ Check Cloudinary credentials in Railway environment variables.`,
-          },
-        ],
-        isError: true,
-      };
+    if (failedUploads.length > 0) {
+      responseContent.push({
+        type: "text",
+        text: `\n⚠️  ${failedUploads.length} upload(s) failed: ${failedUploads
+          .map((r) => r.error)
+          .join(", ")}`,
+      });
     }
+
+    const totalTime = Date.now() - startTime;
+    console.error(
+      `[generate-image] ✅ Returning response to Claude (${totalTime}ms total)`
+    );
+
+    return {
+      content: responseContent,
+      isError: false,
+    };
   } catch (error: any) {
-    console.error("[generate-image] ❌ Fatal error:", error.message);
+    console.error("[generate-image] ❌ Error:", error.message);
 
     let errorMessage = `Failed to generate image: ${
       error.message || "Unknown error"
     }`;
 
-    // Add helpful context based on error type
-    if (
-      error.code === "ERR_STREAM_PREMATURE_CLOSE" ||
-      error.message?.includes("Premature close")
-    ) {
-      errorMessage +=
-        "\n\nConnection interrupted. Try simplifying your prompt or waiting a moment.";
+    if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+      errorMessage += "\n\nRequest timed out. Try a simpler prompt.";
     } else if (error.status === 429) {
-      errorMessage +=
-        "\n\nRate limit exceeded. Please wait before trying again.";
+      errorMessage += "\n\nRate limit exceeded. Please wait.";
     } else if (error.status === 400) {
-      errorMessage +=
-        "\n\nInvalid request. Check your prompt and ensure the model supports image generation.";
+      errorMessage += "\n\nInvalid request. Check your prompt.";
     } else if (error.status === 401) {
-      errorMessage +=
-        "\n\nAuthentication failed. Check your OpenRouter API key.";
-    } else if (error.status && error.status >= 500) {
-      errorMessage +=
-        "\n\nOpenRouter server error. Please try again in a moment.";
+      errorMessage += "\n\nAuthentication failed. Check OpenRouter API key.";
     }
 
     return {
-      content: [
-        {
-          type: "text",
-          text: errorMessage,
-        },
-      ],
+      content: [{ type: "text", text: errorMessage }],
       isError: true,
     };
   }
