@@ -107,11 +107,6 @@ export function registerImageGenerationTools(
               type: "text",
               text: `✅ Image generated in ${genTime}ms\n\nPrompt: "${args.prompt}"\nModel: ${model}`,
             },
-            {
-              type: "image",
-              data: imageData,
-              mimeType: "image/png",
-            },
           ],
         };
       } catch (error: any) {
