@@ -24,7 +24,7 @@ export interface GenerateImageToolRequest {
   cloudinary_folder?: string;
 }
 
-const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1-schnell-free";
+const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 /**
  * Retry helper with exponential backoff
@@ -96,7 +96,7 @@ export async function handleGenerateImage(
       }"`
     );
 
-    // OpenRouter uses Chat Completions API for ALL models (including FLUX)
+    // OpenRouter uses Chat Completions API for ALL image generation models
     console.error(`[generate-image] Using Chat Completions API for ${model}`);
 
     const requestParams: any = {
@@ -110,26 +110,7 @@ export async function handleGenerateImage(
       modalities: ["image", "text"], // Required for image generation
     };
 
-    // Add size for FLUX models
-    if (args.aspect_ratio && model.toLowerCase().includes("flux")) {
-      const sizeMap: Record<string, string> = {
-        "1:1": "1024x1024",
-        "16:9": "1344x768",
-        "9:16": "768x1344",
-        "21:9": "1536x640",
-        "9:21": "640x1536",
-        "4:3": "1152x896",
-        "3:4": "896x1152",
-        "4:5": "896x1088",
-        "5:4": "1088x896",
-        "2:3": "832x1216",
-        "3:2": "1216x832",
-      };
-      requestParams.size = sizeMap[args.aspect_ratio] || "1024x1024";
-      console.error(`[generate-image] Using size: ${requestParams.size}`);
-    }
-
-    // Add image_config for Gemini models
+    // Add image_config for Gemini models (most OpenRouter image models use Gemini)
     if (model.toLowerCase().includes("gemini") && args.aspect_ratio) {
       requestParams.image_config = {
         aspect_ratio: args.aspect_ratio,

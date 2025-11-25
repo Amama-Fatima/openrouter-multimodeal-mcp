@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerTools } from "./tools/register-tools.js";
 
 const DEFAULT_MODEL = "qwen/qwen2.5-vl-32b-instruct:free";
-const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1-schnell-free";
+const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 const server = new McpServer({
   name: "openrouter-multimodal-mcp",

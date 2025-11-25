@@ -9,7 +9,7 @@ const generateImageSchema = z.object({
     .string()
     .optional()
     .describe(
-      'OpenRouter model to use for generation (e.g., "black-forest-labs/flux-1.1-pro")'
+      'OpenRouter model to use for generation (e.g., "google/gemini-2.5-flash-image", "google/gemini-3-pro-image-preview")'
     ),
   aspect_ratio: z
     .enum(["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"])
