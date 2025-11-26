@@ -186,11 +186,11 @@ export function registerImageGenerationTools(
               });
 
               // Add image using Cloudinary URL (NOT base64)
-              responses.push({
-                type: "image" as const,
-                data: uploadResult.url,
-                mimeType: `image/${uploadResult.format}`,
-              });
+              // responses.push({
+              //   type: "image" as const,
+              //   data: uploadResult.url,
+              //   mimeType: `image/${uploadResult.format}`,
+              // });
             } else {
               // Fallback to base64 if upload fails
               responses.push({
