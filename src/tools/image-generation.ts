@@ -172,7 +172,7 @@ export function registerImageGenerationTools(
               img.mimeType,
               {
                 folder,
-                context: `prompt=${args.prompt}`,
+                context: `prompt=${args.prompt.substring(0, 75)}`,
                 tags: ["ai-generated", "openrouter", model.split("/")[0]],
               }
             );
