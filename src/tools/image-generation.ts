@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import OpenAI from "openai";
+import { uploadToCloudinary } from "../utils/cloudinary.js";
 
 const generateImageSchema = z.object({
   prompt: z.string().describe("Text prompt describing the image to generate"),
@@ -17,9 +18,48 @@ const generateImageSchema = z.object({
   upload_to_cloudinary: z
     .boolean()
     .optional()
-    .default(false)
+    .default(true)
     .describe("Whether to upload the generated image to Cloudinary"),
+  cloudinary_folder: z
+    .string()
+    .optional()
+    .default("ai-generated")
+    .describe("Cloudinary folder to upload to"),
 });
+
+/**
+ * Extract base64 from data URI
+ */
+function extractBase64(dataUri: string): string {
+  if (dataUri.startsWith("data:")) {
+    return dataUri.split(",")[1];
+  }
+  return dataUri;
+}
+
+/**
+ * Extract mime type from data URI
+ */
+function extractMimeType(dataUri: string): string {
+  if (dataUri.startsWith("data:")) {
+    const match = dataUri.match(/data:([^;]+);/);
+    return match ? match[1] : "image/png";
+  }
+  return "image/png";
+}
+
+/**
+ * Format success message
+ */
+function formatSuccessMessage(uploadResult: any): string {
+  return `✅ **Image Generated & Uploaded Successfully!**
+
+🔗 **Cloudinary URL**: ${uploadResult.url}
+📦 **Format**: ${uploadResult.format}
+📏 **Dimensions**: ${uploadResult.width}x${uploadResult.height}
+💾 **Size**: ${(uploadResult.bytes / 1024).toFixed(2)} KB
+🆔 **Public ID**: ${uploadResult.public_id}`;
+}
 
 export function registerImageGenerationTools(
   server: McpServer,
@@ -35,16 +75,22 @@ export function registerImageGenerationTools(
     },
   });
 
-  server.tool(
+  // Use registerTool like OpenAI MCP
+  server.registerTool(
     "mcp_openrouter_generate_image",
-    "Generate an image from a text prompt using OpenRouter image generation models",
-    generateImageSchema.shape,
-    async (args) => {
+    {
+      title: "AI Image Generation (OpenRouter)",
+      description:
+        "Generate an image from a text prompt using OpenRouter image generation models (Gemini, etc.). Images are automatically uploaded to Cloudinary.",
+      inputSchema: generateImageSchema.shape,
+    },
+    async (args, extra) => {
       console.log("[IMAGE-GEN] Starting generation");
       console.log("[IMAGE-GEN] Prompt:", args.prompt);
       console.log("[IMAGE-GEN] Model:", args.model || defaultImageModel);
 
       const model = args.model || defaultImageModel;
+      const folder = args.cloudinary_folder || "ai-generated";
 
       try {
         // Build request
@@ -82,33 +128,96 @@ export function registerImageGenerationTools(
           };
         }
 
-        // Get the first image
-        const imageData = images[0].image_url?.url || images[0].url;
+        console.log(`[IMAGE-GEN] Processing ${images.length} image(s)`);
 
-        if (!imageData) {
+        // Process images - convert to base64 and mimeType format like OpenAI MCP
+        const processedImages = images
+          .map((img: any) => {
+            const dataUri = img.image_url?.url || img.url;
+            if (!dataUri) return null;
+
+            return {
+              b64: extractBase64(dataUri),
+              mimeType: extractMimeType(dataUri),
+            };
+          })
+          .filter((img: any) => img !== null);
+
+        if (processedImages.length === 0) {
           return {
             content: [
               {
                 type: "text",
-                text: "❌ No image data found",
+                text: "❌ No valid image data found",
               },
             ],
             isError: true,
           };
         }
 
-        console.log("[IMAGE-GEN] Image data length:", imageData.length);
-        console.log("[IMAGE-GEN] Returning response");
+        // Upload to Cloudinary if requested
+        if (args.upload_to_cloudinary) {
+          console.log(
+            `[IMAGE-GEN] Uploading ${processedImages.length} image(s) to Cloudinary folder: ${folder}`
+          );
 
-        // Return with base64 image
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Image generated in ${genTime}ms\n\nPrompt: "${args.prompt}"\nModel: ${model}`,
-            },
-          ],
-        };
+          const responses = [];
+
+          // Upload each image - exactly like OpenAI MCP
+          for (let i = 0; i < processedImages.length; i++) {
+            const img = processedImages[i];
+
+            const uploadResult = await uploadToCloudinary(
+              img.b64,
+              img.mimeType,
+              {
+                folder,
+                context: `prompt=${args.prompt}`,
+                tags: ["ai-generated", "openrouter", model.split("/")[0]],
+              }
+            );
+
+            if (uploadResult.success && uploadResult.url) {
+              const successMessage = formatSuccessMessage(uploadResult);
+
+              responses.push({
+                type: "text" as const,
+                text: successMessage,
+              });
+
+              // Add image using Cloudinary URL (NOT base64)
+              responses.push({
+                type: "image" as const,
+                data: uploadResult.url,
+                mimeType: `image/${uploadResult.format}`,
+              });
+            } else {
+              // Fallback to base64 if upload fails
+              responses.push({
+                type: "text" as const,
+                text: `⚠️ Cloudinary upload failed: ${uploadResult.error}\n\nShowing image using base64 data instead:`,
+              });
+              responses.push({
+                type: "image" as const,
+                data: `data:${img.mimeType};base64,${img.b64}`,
+                mimeType: img.mimeType,
+              });
+            }
+          }
+
+          console.log(`[IMAGE-GEN] Successfully uploaded to Cloudinary`);
+          return { content: responses };
+        } else {
+          // Return without Cloudinary upload
+          return {
+            content: [
+              {
+                type: "text",
+                text: `✅ Image generated in ${genTime}ms\n\nPrompt: "${args.prompt}"\nModel: ${model}\n\n(Upload to Cloudinary disabled)`,
+              },
+            ],
+          };
+        }
       } catch (error: any) {
         console.error("[IMAGE-GEN] Error:", error.message);
         return {
