@@ -329,26 +329,51 @@ export function registerImageGenerationTools(
         }
 
         // Add number of images parameter
+        // Note: numberOfImages is only supported by Imagen models, not Gemini image models
+        // Gemini models generate images conversationally and don't support this parameter
         if (numImages > 1) {
-          if (model.toLowerCase().includes("gemini")) {
+          if (model.toLowerCase().includes("imagen")) {
             requestParams.numberOfImages = numImages;
-          } else {
+          } else if (!model.toLowerCase().includes("gemini")) {
             requestParams.n = numImages;
           }
+          // For Gemini models, we'll need to make multiple sequential calls
         }
 
-        // Generate image
+        // Generate image(s)
+        // Note: Gemini models don't support generating multiple images in one call
+        // so we need to make multiple sequential calls for n > 1
         const startTime = Date.now();
-        const result = await openai.chat.completions.create(requestParams);
-        const genTime = Date.now() - startTime;
+        let allImages: any[] = [];
 
-        console.log(`[IMAGE-GEN] Generated in ${genTime}ms`);
+        if (model.toLowerCase().includes("gemini") && numImages > 1) {
+          console.log(
+            `[IMAGE-GEN] Gemini model detected - making ${numImages} sequential calls`
+          );
+
+          for (let i = 0; i < numImages; i++) {
+            console.log(
+              `[IMAGE-GEN] Generating image ${i + 1}/${numImages}...`
+            );
+            const result = await openai.chat.completions.create(requestParams);
+            const message = result.choices?.[0]?.message;
+            const images = (message as any)?.images || [];
+            allImages.push(...images);
+          }
+        } else {
+          // Single call for Imagen or other models
+          const result = await openai.chat.completions.create(requestParams);
+          const message = result.choices?.[0]?.message;
+          allImages = (message as any)?.images || [];
+        }
+
+        const genTime = Date.now() - startTime;
+        console.log(
+          `[IMAGE-GEN] Generated ${allImages.length} image(s) in ${genTime}ms`
+        );
 
         // Extract images
-        const message = result.choices?.[0]?.message;
-        const images = (message as any)?.images || [];
-
-        if (!images || images.length === 0) {
+        if (!allImages || allImages.length === 0) {
           return {
             content: [
               {
@@ -360,10 +385,10 @@ export function registerImageGenerationTools(
           };
         }
 
-        console.log(`[IMAGE-GEN] Processing ${images.length} image(s)`);
+        console.log(`[IMAGE-GEN] Processing ${allImages.length} image(s)`);
 
         // Process images - convert to base64 and mimeType format
-        const processedImages = images
+        const processedImages = allImages
           .map((img: any) => {
             const dataUri = img.image_url?.url || img.url;
             if (!dataUri) return null;
@@ -406,6 +431,7 @@ export function registerImageGenerationTools(
           // Process and upload each image
           for (let i = 0; i < processedImages.length; i++) {
             const img = processedImages[i];
+            if (!img) continue;
             const originalSize = (
               Buffer.from(img.b64, "base64").length / 1024
             ).toFixed(2);
@@ -445,20 +471,15 @@ export function registerImageGenerationTools(
               );
 
               if (uploadResult.success && uploadResult.url) {
-                const successMessage = formatSuccessMessage(
-                  uploadResult,
-                  i + 1,
-                  processedImages.length,
-                  {
-                    originalSize: `${originalSize} KB`,
-                    processedSize: `${processedSize} KB`,
-                    format: processed.format,
-                  }
-                );
+                // Simple, minimal response with just the URL and key info
+                const imageLabel =
+                  processedImages.length > 1
+                    ? ` [${i + 1}/${processedImages.length}]`
+                    : "";
 
                 responses.push({
                   type: "text" as const,
-                  text: successMessage,
+                  text: `✅ Image${imageLabel}: ${uploadResult.url}\n📊 ${originalSize}KB → ${processedSize}KB (${processed.format}, ${args.quality})`,
                 });
               } else {
                 responses.push({
