@@ -5,6 +5,7 @@ import { registerChatTools } from "./chat.js";
 import { registerImageAnalysisTools } from "./image-analysis.js";
 import { registerImageGenerationTools } from "./image-generation.js";
 import { registerModelTools } from "./models.js";
+import { registerSettingsTools } from "./image-settings.js";
 
 export function registerTools(
   server: McpServer,
@@ -19,4 +20,5 @@ export function registerTools(
   registerImageAnalysisTools(server, apiKey, defaultModel);
   registerImageGenerationTools(server, apiKey, defaultImageModel);
   registerModelTools(server, apiClient, modelCache);
+  registerSettingsTools(server);
 }
