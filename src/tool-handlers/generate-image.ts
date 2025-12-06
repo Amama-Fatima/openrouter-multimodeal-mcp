@@ -18,8 +18,6 @@ export interface GenerateImageToolRequest {
   cloudinary_folder?: string;
 }
 
-const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
-
 /**
  * Extract base64 from data URI
  */
@@ -82,7 +80,7 @@ export async function handleGenerateImage(
   }
 
   try {
-    const model = args.model || defaultModel || DEFAULT_IMAGE_MODEL;
+    const model = args.model || defaultModel || "google/gemini-2.5-flash-image";
     const folder = args.cloudinary_folder || "ai-generated";
 
     console.log("[generate-image] Parameters:", {

@@ -10,15 +10,14 @@ import { registerSettingsTools } from "./image-settings.js";
 export function registerTools(
   server: McpServer,
   apiKey: string,
-  defaultModel: string,
-  defaultImageModel: string
+  defaultModel: string
 ) {
   const apiClient = new OpenRouterAPIClient(apiKey);
   const modelCache = ModelCache.getInstance();
 
   registerChatTools(server, apiKey, defaultModel);
   registerImageAnalysisTools(server, apiKey, defaultModel);
-  registerImageGenerationTools(server, apiKey, defaultImageModel);
+  registerImageGenerationTools(server, apiKey);
   registerModelTools(server, apiClient, modelCache);
   registerSettingsTools(server);
 }

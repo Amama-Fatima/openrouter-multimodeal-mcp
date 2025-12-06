@@ -5,7 +5,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerTools } from "./tools/register-tools.js";
 
 const DEFAULT_MODEL = "qwen/qwen2.5-vl-32b-instruct:free";
-const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 const server = new McpServer({
   name: "openrouter-multimodal-mcp",
@@ -24,18 +23,15 @@ const server = new McpServer({
     }
 
     const defaultModel = process.env.OPENROUTER_DEFAULT_MODEL || DEFAULT_MODEL;
-    const defaultImageModel =
-      process.env.OPENROUTER_IMAGE_MODEL || DEFAULT_IMAGE_MODEL;
 
     // Register all tools
-    registerTools(server, apiKey, defaultModel, defaultImageModel);
+    registerTools(server, apiKey, defaultModel);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
     console.error("OpenRouter Multimodal MCP server running on stdio");
     console.error(`Using default model: ${defaultModel}`);
-    console.error(`Using default image model: ${defaultImageModel}`);
     console.error(
       "Server is ready to process tool calls. Waiting for input..."
     );
