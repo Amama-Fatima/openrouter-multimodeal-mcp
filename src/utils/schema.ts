@@ -9,7 +9,19 @@ const generateImageSchema = z.object({
       'OpenRouter model to use for generation (e.g., "google/gemini-2.5-flash-image"). If not provided, uses the default model from settings.'
     ),
   aspect_ratio: z
-    .enum(["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"])
+    .enum([
+      "1:1",
+      "16:9",
+      "21:9",
+      "2:3",
+      "3:2",
+      "3:4",
+      "4:3",
+      "4:5",
+      "5:4",
+      "9:16",
+      "9:21",
+    ])
     .optional()
     .describe(
       "Aspect ratio for the generated image. If not provided, uses default from settings."

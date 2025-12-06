@@ -6,6 +6,8 @@ export interface GenerateImageToolRequest {
   model?: string;
   aspect_ratio?:
     | "1:1"
+    | "16:9"
+    | "21:9"
     | "2:3"
     | "3:2"
     | "3:4"
@@ -13,8 +15,7 @@ export interface GenerateImageToolRequest {
     | "4:5"
     | "5:4"
     | "9:16"
-    | "16:9"
-    | "21:9";
+    | "9:21";
   cloudinary_folder?: string;
 }
 
