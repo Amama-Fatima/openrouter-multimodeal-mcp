@@ -3,6 +3,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import sharp from "sharp";
 import { uploadToCloudinary } from "../utils/cloudinary.js";
+import { loadSettings } from "./image-settings.js";
 
 const generateImageSchema = z.object({
   prompt: z.string().describe("Text prompt describing the image to generate"),
@@ -10,32 +11,37 @@ const generateImageSchema = z.object({
     .string()
     .optional()
     .describe(
-      'OpenRouter model to use for generation (e.g., "google/gemini-2.5-flash-image")'
+      'OpenRouter model to use for generation (e.g., "google/gemini-2.5-flash-image"). If not provided, uses the default model from settings.'
     ),
   aspect_ratio: z
     .enum(["1:1", "16:9", "21:9", "2:3", "3:2", "4:5", "5:4", "9:16", "9:21"])
     .optional()
-    .describe("Aspect ratio for the generated image"),
+    .describe(
+      "Aspect ratio for the generated image. If not provided, uses default from settings."
+    ),
   n: z
     .number()
     .int()
     .min(1)
     .max(4)
     .optional()
-    .default(1)
-    .describe("Number of images to generate (1-4, default: 1)"),
+    .describe(
+      "Number of images to generate (1-4). If not provided, uses default from settings."
+    ),
 
   // Image Processing Options
   output_format: z
     .enum(["png", "jpeg", "jpg", "webp", "avif"])
     .optional()
-    .default("png")
-    .describe("Output image format (png, jpeg, webp, avif)"),
+    .describe(
+      "Output image format. If not provided, uses default from settings."
+    ),
   quality: z
     .enum(["low", "medium", "high"])
     .optional()
-    .default("medium")
-    .describe("Image quality: low (50), medium (70), high (90)"),
+    .describe(
+      "Image quality: low (50), medium (70), high (90). If not provided, uses default from settings."
+    ),
   output_compression: z
     .number()
     .int()
@@ -43,34 +49,34 @@ const generateImageSchema = z.object({
     .max(9)
     .optional()
     .describe(
-      "PNG compression level (0-9, only for PNG format). 0=fastest/largest, 9=slowest/smallest"
+      "PNG compression level (0-9, only for PNG format). 0=fastest/largest, 9=slowest/smallest. If not provided, uses default from settings."
     ),
   size: z
     .enum(["auto", "1K", "2K", "4K"])
     .optional()
-    .default("auto")
     .describe(
-      "Resize image: auto (original), 1K (1024px), 2K (2048px), 4K (4096px)"
+      "Resize image: auto (original), 1K (1024px), 2K (2048px), 4K (4096px). If not provided, uses default from settings."
     ),
   background: z
     .enum(["auto", "transparent", "white", "black"])
     .optional()
-    .default("auto")
     .describe(
-      "Background handling: auto (keep original), transparent, white, black"
+      "Background handling: auto (keep original), transparent, white, black. If not provided, uses default from settings."
     ),
 
   // Cloudinary Options
   upload_to_cloudinary: z
     .boolean()
     .optional()
-    .default(true)
-    .describe("Whether to upload the generated image to Cloudinary"),
+    .describe(
+      "Whether to upload the generated image to Cloudinary. If not provided, uses default from settings."
+    ),
   cloudinary_folder: z
     .string()
     .optional()
-    .default("ai-generated")
-    .describe("Cloudinary folder to upload to"),
+    .describe(
+      "Cloudinary folder to upload to. If not provided, uses default from settings."
+    ),
 });
 
 /**
@@ -246,41 +252,9 @@ async function processImageWithSharp(
   };
 }
 
-/**
- * Format success message
- */
-function formatSuccessMessage(
-  uploadResult: any,
-  imageIndex: number,
-  totalImages: number,
-  processingStats?: {
-    originalSize: string;
-    processedSize: string;
-    format: string;
-  }
-): string {
-  const imageLabel =
-    totalImages > 1 ? ` (Image ${imageIndex}/${totalImages})` : "";
-
-  let message = `✅ **Image Generated & Uploaded Successfully!**${imageLabel}\n\n`;
-
-  if (processingStats) {
-    message += `🔧 **Processing**: ${processingStats.originalSize} → ${processingStats.processedSize} (${processingStats.format})\n`;
-  }
-
-  message += `🔗 **Cloudinary URL**: ${uploadResult.url}
-📦 **Format**: ${uploadResult.format}
-📏 **Dimensions**: ${uploadResult.width}x${uploadResult.height}
-💾 **Size**: ${(uploadResult.bytes / 1024).toFixed(2)} KB
-🆔 **Public ID**: ${uploadResult.public_id}`;
-
-  return message;
-}
-
 export function registerImageGenerationTools(
   server: McpServer,
-  apiKey: string,
-  defaultImageModel: string
+  apiKey: string
 ) {
   const openai = new OpenAI({
     apiKey: apiKey,
@@ -296,26 +270,46 @@ export function registerImageGenerationTools(
     {
       title: "AI Image Generation with Post-Processing (OpenRouter + Sharp)",
       description:
-        "Generate one or multiple images from a text prompt using OpenRouter (Gemini, etc.), with advanced post-processing options including format conversion, quality control, compression, resizing, and background handling. Images are automatically processed and uploaded to Cloudinary.",
+        "Generate one or multiple images from a text prompt using OpenRouter (Gemini, Imagen, etc.), with advanced post-processing options. All parameters are optional except 'prompt' - if not provided, default settings will be used. You can override any default setting by providing it explicitly. Images are automatically processed and uploaded to Cloudinary.",
       inputSchema: generateImageSchema.shape,
     },
     async (args, extra) => {
       console.log("[IMAGE-GEN] Starting generation");
       console.log("[IMAGE-GEN] Prompt:", args.prompt);
-      console.log("[IMAGE-GEN] Model:", args.model || defaultImageModel);
-      console.log("[IMAGE-GEN] Number of images:", args.n);
-      console.log("[IMAGE-GEN] Processing options:", {
-        format: args.output_format,
-        quality: args.quality,
-        size: args.size,
-        background: args.background,
-      });
-
-      const model = args.model || defaultImageModel;
-      const folder = args.cloudinary_folder || "ai-generated";
-      const numImages = args.n || 1;
 
       try {
+        // Load default settings
+        const settings = await loadSettings();
+        console.log("[IMAGE-GEN] Loaded default settings");
+
+        // Merge args with settings (args override settings)
+        const model =
+          args.model || settings.model || "google/gemini-2.5-flash-image";
+        const aspect_ratio = args.aspect_ratio || settings.aspect_ratio;
+        const numImages = args.n ?? settings.n ?? 1;
+        const output_format =
+          args.output_format || settings.output_format || "png";
+        const quality = args.quality || settings.quality || "medium";
+        const output_compression =
+          args.output_compression ?? settings.output_compression;
+        const size = args.size || settings.size || "auto";
+        const background = args.background || settings.background || "auto";
+        const upload_to_cloudinary =
+          args.upload_to_cloudinary ?? settings.upload_to_cloudinary ?? true;
+        const folder =
+          args.cloudinary_folder ||
+          settings.cloudinary_folder ||
+          "ai-generated";
+
+        console.log("[IMAGE-GEN] Using model:", model);
+        console.log("[IMAGE-GEN] Number of images:", numImages);
+        console.log("[IMAGE-GEN] Processing options:", {
+          format: output_format,
+          quality: quality,
+          size: size,
+          background: background,
+        });
+
         // Build request
         const requestParams: any = {
           model: model,
@@ -324,8 +318,8 @@ export function registerImageGenerationTools(
         };
 
         // Add aspect ratio for Gemini models
-        if (model.toLowerCase().includes("gemini") && args.aspect_ratio) {
-          requestParams.image_config = { aspect_ratio: args.aspect_ratio };
+        if (model.toLowerCase().includes("gemini") && aspect_ratio) {
+          requestParams.image_config = { aspect_ratio: aspect_ratio };
         }
 
         // Add number of images parameter
@@ -413,7 +407,7 @@ export function registerImageGenerationTools(
         }
 
         // Upload to Cloudinary if requested
-        if (args.upload_to_cloudinary) {
+        if (upload_to_cloudinary) {
           console.log(
             `[IMAGE-GEN] Processing and uploading ${processedImages.length} image(s) to Cloudinary folder: ${folder}`
           );
@@ -439,11 +433,11 @@ export function registerImageGenerationTools(
             try {
               // Process image with Sharp
               const processed = await processImageWithSharp(img.b64, {
-                output_format: args.output_format || "png",
-                quality: args.quality || "medium",
-                output_compression: args.output_compression,
-                size: args.size || "auto",
-                background: args.background || "auto",
+                output_format: output_format,
+                quality: quality,
+                output_compression: output_compression,
+                size: size,
+                background: background,
               });
 
               const processedSize = (processed.buffer.length / 1024).toFixed(2);
@@ -459,14 +453,15 @@ export function registerImageGenerationTools(
                     i + 1
                   }/${processedImages.length}|format=${
                     processed.format
-                  }|quality=${args.quality}`,
+                  }|quality=${quality}`,
                   tags: [
                     "ai-generated",
                     "openrouter",
                     model.split("/")[0],
                     `format-${processed.format}`,
-                    `quality-${args.quality}`,
+                    `quality-${quality}`,
                   ],
+                  timeout: 30000,
                 }
               );
 
@@ -479,7 +474,7 @@ export function registerImageGenerationTools(
 
                 responses.push({
                   type: "text" as const,
-                  text: `✅ Image${imageLabel}: ${uploadResult.url}\n📊 ${originalSize}KB → ${processedSize}KB (${processed.format}, ${args.quality})`,
+                  text: `✅ Image${imageLabel}: ${uploadResult.url}\n📊 ${originalSize}KB → ${processedSize}KB (${processed.format}, ${quality})`,
                 });
               } else {
                 responses.push({
