@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
+import { SETTINGS_DESCRIPTIONS } from "../utils/description.js";
 
 // Settings schema matching your image generation options
 interface ImageGenerationSettings {
@@ -106,8 +107,7 @@ export function registerSettingsTools(server: McpServer) {
     "mcp_openrouter_get_settings",
     {
       title: "Get Image Generation Settings",
-      description:
-        "Retrieve the current default settings for image generation. These settings are used when specific parameters are not provided in image generation requests.",
+      description: `${SETTINGS_DESCRIPTIONS.get}`,
       inputSchema: z.object({}).shape,
     },
     async (args, extra) => {
@@ -141,8 +141,7 @@ export function registerSettingsTools(server: McpServer) {
     "mcp_openrouter_update_settings",
     {
       title: "Update Image Generation Settings",
-      description:
-        "Update one or more default settings for image generation. Only provide the settings you want to change - others will remain unchanged.",
+      description: `${SETTINGS_DESCRIPTIONS.update}`,
       inputSchema: z.object({
         model: z
           .string()
@@ -270,8 +269,7 @@ ${formatSettings(newSettings)}`,
     "mcp_openrouter_reset_settings",
     {
       title: "Reset Image Generation Settings",
-      description:
-        "Reset all image generation settings to their default values.",
+      description: `${SETTINGS_DESCRIPTIONS.reset}`,
       inputSchema: z.object({
         confirm: z
           .boolean()
