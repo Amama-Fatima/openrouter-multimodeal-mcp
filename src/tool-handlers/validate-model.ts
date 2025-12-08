@@ -1,7 +1,7 @@
-import { ModelCache } from '../model-cache.js';
+import { ModelCache } from "../model-cache.js";
 
 export interface ValidateModelToolRequest {
-  model: string;
+  model_id: string;
 }
 
 export async function handleValidateModel(
@@ -9,26 +9,26 @@ export async function handleValidateModel(
   modelCache: ModelCache
 ) {
   const args = request.params.arguments;
-  
+
   try {
     if (!modelCache.isCacheValid()) {
       return {
         content: [
           {
-            type: 'text',
-            text: 'Model cache is empty or expired. Please call search_models first to populate the cache.',
+            type: "text",
+            text: "Model cache is empty or expired. Please call search_models first to populate the cache.",
           },
         ],
         isError: true,
       };
     }
-    
-    const isValid = modelCache.hasModel(args.model);
-    
+
+    const isValid = modelCache.hasModel(args.model_id);
+
     return {
       content: [
         {
-          type: 'text',
+          type: "text",
           text: JSON.stringify({ valid: isValid }),
         },
       ],
@@ -38,7 +38,7 @@ export async function handleValidateModel(
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: `Error validating model: ${error.message}`,
           },
         ],

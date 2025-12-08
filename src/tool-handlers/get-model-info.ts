@@ -1,8 +1,8 @@
-import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { ModelCache } from '../model-cache.js';
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ModelCache } from "../model-cache.js";
 
 export interface GetModelInfoToolRequest {
-  model: string;
+  model_id: string;
 }
 
 export async function handleGetModelInfo(
@@ -10,29 +10,32 @@ export async function handleGetModelInfo(
   modelCache: ModelCache
 ) {
   const args = request.params.arguments;
-  
+
   try {
     if (!modelCache.isCacheValid()) {
       return {
         content: [
           {
-            type: 'text',
-            text: 'Model cache is empty or expired. Please call search_models first to populate the cache.',
+            type: "text",
+            text: "Model cache is empty or expired. Please call search_models first to populate the cache.",
           },
         ],
         isError: true,
       };
     }
-    
-    const model = modelCache.getModel(args.model);
+
+    const model = modelCache.getModel(args.model_id);
     if (!model) {
-      throw new McpError(ErrorCode.InvalidParams, `Model '${args.model}' not found`);
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Model '${args.model_id}' not found`
+      );
     }
-    
+
     return {
       content: [
         {
-          type: 'text',
+          type: "text",
           text: JSON.stringify(model, null, 2),
         },
       ],
@@ -42,7 +45,7 @@ export async function handleGetModelInfo(
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: `Error retrieving model info: ${error.message}`,
           },
         ],
