@@ -5,7 +5,7 @@ This document explains how to test the OAuth authentication with MCP Inspector's
 ## Overview
 
 The MCP server now implements **full OAuth 2.1** as an authorization server, which is compatible with:
-- **MCP Inspector** - For local testing
+- **MCP Inspector** ****- For local testing
 - **Claude Desktop** - For production use
 - **Any OAuth 2.1 compliant client**
 

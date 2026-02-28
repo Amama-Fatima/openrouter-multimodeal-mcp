@@ -271,7 +271,7 @@ router.get("/authorize", (req, res) => {
  * GET /oauth/openrouter-callback
  * Callback from OpenRouter OAuth - then issues our authorization code
  */
-router.get("/openrouter-callback", async (req, res) => {
+router.get("/openrouter-callback", async (req, res, next) => {
   logRequest(req, "OAUTH_OPENROUTER_CALLBACK");
   
   const { code: orCode, state: orState, error } = req.query;
@@ -365,7 +365,7 @@ router.get("/openrouter-callback", async (req, res) => {
     });
     
     // Store authorization code with user's API key
-    storeAuthorizationCode(
+    const storeResult = storeAuthorizationCode(
       authCode,
       userId,
       apiKey, // Store API key with authorization code
@@ -375,6 +375,10 @@ router.get("/openrouter-callback", async (req, res) => {
       authData.codeChallengeMethod,
       authData.scopes
     );
+    // Handle async if using database storage
+    if (storeResult instanceof Promise) {
+      await storeResult;
+    }
 
     // Redirect back to client with authorization code
     const redirectUri = `${authData.redirectUri}?code=${authCode}&state=${authData.state || ""}`;
@@ -391,11 +395,18 @@ router.get("/openrouter-callback", async (req, res) => {
       state: orState,
       has_auth_data: !!authData,
     });
-    const errorUri = `${authData.redirectUri}?error=server_error&error_description=${encodeURIComponent(error.message)}&state=${authData.state || ""}`;
-    log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Redirecting to client with error", {
-      error_uri: errorUri.substring(0, 100) + "...",
-    });
-    res.redirect(errorUri);
+    
+    // If we have authData, redirect to client with error
+    if (authData && authData.redirectUri) {
+      const errorUri = `${authData.redirectUri}?error=server_error&error_description=${encodeURIComponent(error.message)}&state=${authData.state || ""}`;
+      log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Redirecting to client with error", {
+        error_uri: errorUri.substring(0, 100) + "...",
+      });
+      return res.redirect(errorUri);
+    }
+    
+    // Otherwise, pass to error handler
+    next(error);
   }
 });
 
@@ -470,7 +481,8 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
       has_code_verifier: !!code_verifier,
     });
     
-    const codeData = consumeAuthorizationCode(code, code_verifier);
+    const consumeResult = consumeAuthorizationCode(code, code_verifier);
+    const codeData = consumeResult instanceof Promise ? await consumeResult : consumeResult;
     if (!codeData) {
       log("WARN", "[OAUTH_TOKEN] Invalid or expired authorization code", {
         code: code.substring(0, 10) + "...",
@@ -514,7 +526,7 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
     const refreshToken = generateRefreshToken();
 
     // Store tokens with user's OpenRouter API key
-    storeAccessToken(
+    const storeTokenResult = storeAccessToken(
       accessToken,
       refreshToken,
       codeData.apiKey, // User's OpenRouter API key
@@ -552,7 +564,8 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
       refresh_token: refresh_token.substring(0, 10) + "...",
     });
 
-    const refreshData = getRefreshToken(refresh_token);
+    const refreshResult = getRefreshToken(refresh_token);
+    const refreshData = refreshResult instanceof Promise ? await refreshResult : refreshResult;
     if (!refreshData) {
       log("WARN", "[OAUTH_TOKEN] Invalid or expired refresh token");
       return res.status(400).json({
@@ -568,7 +581,8 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
 
     // Get stored access token data to retrieve API key
     const { getAccessToken } = require("../utils/tokenStorage");
-    const oldTokenData = getAccessToken(refreshData.accessToken);
+    const oldTokenResult = getAccessToken(refreshData.accessToken);
+    const oldTokenData = oldTokenResult instanceof Promise ? await oldTokenResult : oldTokenResult;
     if (!oldTokenData) {
       return res.status(400).json({
         error: "invalid_grant",
@@ -585,7 +599,7 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
     const newRefreshToken = generateRefreshToken();
 
     // Store new tokens
-    storeAccessToken(
+    const storeNewTokenResult = storeAccessToken(
       newAccessToken,
       newRefreshToken,
       oldTokenData.apiKey, // Use existing API key
@@ -593,6 +607,10 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
       refreshData.clientId,
       refreshData.scopes
     );
+    // Handle async if using database storage
+    if (storeNewTokenResult instanceof Promise) {
+      await storeNewTokenResult;
+    }
 
     // Revoke old refresh token
     revokeRefreshToken(refresh_token);
@@ -617,7 +635,7 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
  * POST /oauth/introspect
  * Token Introspection (RFC 7662)
  */
-router.post("/introspect", express.urlencoded({ extended: true }), express.json(), (req, res) => {
+router.post("/introspect", express.urlencoded({ extended: true }), express.json(), async (req, res) => {
   const { token, token_type_hint } = req.body;
 
   if (!token) {
@@ -643,7 +661,8 @@ router.post("/introspect", express.urlencoded({ extended: true }), express.json(
 
   // Try as stored access token
   const { getAccessToken } = require("../utils/tokenStorage");
-  const tokenData = getAccessToken(token);
+  const tokenResult = getAccessToken(token);
+  const tokenData = tokenResult instanceof Promise ? await tokenResult : tokenResult;
   if (tokenData) {
     return res.json({
       active: true,

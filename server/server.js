@@ -5,6 +5,67 @@ const cookieParser = require("cookie-parser");
 const config = require("./config");
 const { startSessionCleanup, cleanupAllSessions } = require("./sessionManager");
 
+// Configure token storage (database or in-memory)
+// Set TOKEN_STORAGE=db to use SQLite database, otherwise uses in-memory
+const useDatabaseStorage = process.env.TOKEN_STORAGE === "db";
+
+if (useDatabaseStorage) {
+  console.log("Using SQLite database for token storage");
+  // Replace in-memory storage with database storage
+  const dbStorage = require("./utils/tokenStorageDB");
+  const memoryStorage = require("./utils/tokenStorage");
+  
+  // Override all exported functions with async versions
+  // Note: This requires all callers to handle async operations
+  // For now, we'll use a wrapper to maintain compatibility
+  const originalStoreAccessToken = memoryStorage.storeAccessToken;
+  memoryStorage.storeAccessToken = async function(...args) {
+    return await dbStorage.storeAccessToken(...args);
+  };
+  
+  const originalGetAccessToken = memoryStorage.getAccessToken;
+  memoryStorage.getAccessToken = async function(...args) {
+    return await dbStorage.getAccessToken(...args);
+  };
+  
+  const originalStoreAuthorizationCode = memoryStorage.storeAuthorizationCode;
+  memoryStorage.storeAuthorizationCode = async function(...args) {
+    return await dbStorage.storeAuthorizationCode(...args);
+  };
+  
+  const originalConsumeAuthorizationCode = memoryStorage.consumeAuthorizationCode;
+  memoryStorage.consumeAuthorizationCode = async function(...args) {
+    return await dbStorage.consumeAuthorizationCode(...args);
+  };
+  
+  const originalGetRefreshToken = memoryStorage.getRefreshToken;
+  memoryStorage.getRefreshToken = async function(...args) {
+    return await dbStorage.getRefreshToken(...args);
+  };
+  
+  const originalRevokeRefreshToken = memoryStorage.revokeRefreshToken;
+  memoryStorage.revokeRefreshToken = async function(...args) {
+    return await dbStorage.revokeRefreshToken(...args);
+  };
+  
+  const originalDeleteToken = memoryStorage.deleteToken;
+  memoryStorage.deleteToken = async function(...args) {
+    return await dbStorage.deleteToken(...args);
+  };
+  
+  const originalDeleteUserTokens = memoryStorage.deleteUserTokens;
+  memoryStorage.deleteUserTokens = async function(...args) {
+    return await dbStorage.deleteUserTokens(...args);
+  };
+  
+  const originalGetStats = memoryStorage.getStats;
+  memoryStorage.getStats = async function(...args) {
+    return await dbStorage.getStats(...args);
+  };
+} else {
+  console.log("Using in-memory token storage (tokens will be lost on restart)");
+}
+
 const healthRoutes = require("./routes/health");
 const mcpRoutes = require("./routes/mcp");
 const debugRoutes = require("./routes/debug");
@@ -199,6 +260,39 @@ app.listen(config.server.port, () => {
   console.log("\n⚠️  IMPORTANT: OAuth authentication is REQUIRED");
   console.log("   No shared API key is used - each user authenticates individually");
   console.log("   Users must complete OAuth flow before accessing MCP endpoints");
+});
+
+// Global error handlers for unhandled promise rejections
+process.on("unhandledRejection", (reason, promise) => {
+  const timestamp = new Date().toISOString();
+  console.error(JSON.stringify({
+    timestamp,
+    level: "ERROR",
+    message: "[UNHANDLED_REJECTION]",
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+    promise: promise.toString(),
+  }));
+  
+  // Don't exit in production - log and continue
+  if (process.env.NODE_ENV === "development") {
+    console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  }
+});
+
+process.on("uncaughtException", (error) => {
+  const timestamp = new Date().toISOString();
+  console.error(JSON.stringify({
+    timestamp,
+    level: "ERROR",
+    message: "[UNCAUGHT_EXCEPTION]",
+    error: error.message,
+    stack: error.stack,
+  }));
+  
+  // Clean up and exit for uncaught exceptions
+  cleanupAllSessions("uncaught exception");
+  process.exit(1);
 });
 
 process.on("SIGTERM", () => {

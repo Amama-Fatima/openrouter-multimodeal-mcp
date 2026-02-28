@@ -12,7 +12,7 @@ function log(level, message, data = {}) {
  * Middleware to verify Bearer token
  * Extracts token from Authorization header and validates it
  */
-function verifyBearerToken(req, res, next) {
+async function verifyBearerToken(req, res, next) {
   const authHeader = req.headers.authorization;
 
   log("INFO", "[AUTH_MIDDLEWARE] Verifying Bearer token", {
@@ -39,69 +39,84 @@ function verifyBearerToken(req, res, next) {
     token_preview: token.substring(0, 20) + "...",
   });
   
-  // Try to verify as JWT first
-  let tokenData = null;
-  const decoded = verifyAccessToken(token);
-  
-  log("INFO", "[AUTH_MIDDLEWARE] Token verification attempt", {
-    is_jwt_valid: !!decoded,
-  });
-  
-  if (decoded) {
-    // JWT token - get stored data
-    tokenData = getAccessToken(token);
-    if (!tokenData) {
-      log("WARN", "[AUTH_MIDDLEWARE] JWT valid but not found in storage", {
-        decoded_user_id: decoded.sub,
-        decoded_client_id: decoded.client_id,
-      });
-      // JWT is valid but not in storage - this shouldn't happen, but handle gracefully
-      return res.status(401).json({
-        error: "Unauthorized",
-        message: "Token not found in storage",
-      });
-    }
-    log("INFO", "[AUTH_MIDDLEWARE] JWT token validated", {
-      user_id: tokenData.userId,
-      client_id: tokenData.clientId,
+  try {
+    // Try to verify as JWT first
+    let tokenData = null;
+    const decoded = verifyAccessToken(token);
+    
+    log("INFO", "[AUTH_MIDDLEWARE] Token verification attempt", {
+      is_jwt_valid: !!decoded,
     });
-  } else {
-    // Try as stored opaque token
-    tokenData = getAccessToken(token);
-    if (tokenData) {
-      log("INFO", "[AUTH_MIDDLEWARE] Opaque token validated", {
+    
+    if (decoded) {
+      // JWT token - get stored data (may be async if using database)
+      const tokenResult = getAccessToken(token);
+      tokenData = tokenResult instanceof Promise ? await tokenResult : tokenResult;
+      
+      if (!tokenData) {
+        log("WARN", "[AUTH_MIDDLEWARE] JWT valid but not found in storage", {
+          decoded_user_id: decoded.sub,
+          decoded_client_id: decoded.client_id,
+        });
+        // JWT is valid but not in storage - this shouldn't happen, but handle gracefully
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Token not found in storage",
+        });
+      }
+      log("INFO", "[AUTH_MIDDLEWARE] JWT token validated", {
         user_id: tokenData.userId,
         client_id: tokenData.clientId,
       });
+    } else {
+      // Try as stored opaque token
+      const tokenResult = getAccessToken(token);
+      tokenData = tokenResult instanceof Promise ? await tokenResult : tokenResult;
+      
+      if (tokenData) {
+        log("INFO", "[AUTH_MIDDLEWARE] Opaque token validated", {
+          user_id: tokenData.userId,
+          client_id: tokenData.clientId,
+        });
+      }
     }
-  }
 
-  if (!tokenData) {
-    log("WARN", "[AUTH_MIDDLEWARE] Token validation failed", {
+    if (!tokenData) {
+      log("WARN", "[AUTH_MIDDLEWARE] Token validation failed", {
+        path: req.path,
+      });
+      return res.status(401).json({
+        error: "Unauthorized",
+        message: "Invalid or expired token",
+      });
+    }
+
+    // Attach user info to request
+    req.user = {
+      userId: tokenData.userId,
+      apiKey: tokenData.apiKey,
+      clientId: tokenData.clientId,
+      scopes: tokenData.scopes || [],
+      token: token,
+    };
+
+    log("INFO", "[AUTH_MIDDLEWARE] Authentication successful", {
+      user_id: req.user.userId,
+      client_id: req.user.clientId,
       path: req.path,
     });
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Invalid or expired token",
+
+    next();
+  } catch (error) {
+    log("ERROR", "[AUTH_MIDDLEWARE] Error during token verification", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return res.status(500).json({
+      error: "Internal Server Error",
+      message: "Token verification failed",
     });
   }
-
-  // Attach user info to request
-  req.user = {
-    userId: tokenData.userId,
-    apiKey: tokenData.apiKey,
-    clientId: tokenData.clientId,
-    scopes: tokenData.scopes || [],
-    token: token,
-  };
-
-  log("INFO", "[AUTH_MIDDLEWARE] Authentication successful", {
-    user_id: req.user.userId,
-    client_id: req.user.clientId,
-    path: req.path,
-  });
-
-  next();
 }
 
 /**

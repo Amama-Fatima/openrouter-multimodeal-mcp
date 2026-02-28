@@ -254,6 +254,7 @@ function getStats() {
   };
 }
 
+// Export functions - can be overridden by database storage
 module.exports = {
   storeAccessToken,
   getAccessToken,
