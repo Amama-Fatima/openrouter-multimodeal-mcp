@@ -238,11 +238,13 @@ router.get("/authorize", (req, res) => {
   const orState = generateSessionToken();
 
   // Store OpenRouter OAuth state
+  // Note: code_challenge is the client's PKCE challenge (for our OAuth flow)
+  // orCodeChallenge is our PKCE challenge (for OpenRouter OAuth)
   openRouterAuths.set(orState, {
     codeVerifier,
     clientId: client_id,
     redirectUri: redirect_uri,
-    codeChallenge,
+    codeChallenge: code_challenge, // Client's PKCE challenge (from query params)
     codeChallengeMethod: code_challenge_method || "S256",
     scopes,
     state, // Original state from client
