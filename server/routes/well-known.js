@@ -17,10 +17,14 @@ function log(level, message, data = {}) {
  * Allows MCP clients like Claude to auto-discover OAuth configuration
  */
 router.get("/oauth-protected-resource", (req, res) => {
-  const baseUrl = req.protocol + "://" + req.get("host");
+  // Force HTTPS in production (Railway uses X-Forwarded-Proto)
+  const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+  const baseUrl = `${protocol}://${req.get("host")}`;
 
   log("INFO", "[WELL_KNOWN] OAuth protected resource metadata requested", {
     base_url: baseUrl,
+    protocol: req.protocol,
+    forwarded_proto: req.get("x-forwarded-proto"),
     user_agent: req.get("user-agent"),
     ip: req.ip,
   });
@@ -43,16 +47,32 @@ router.get("/oauth-protected-resource", (req, res) => {
   });
 });
 
+// Handle incorrect discovery URLs (MCP Inspector sometimes appends the secret path)
+router.get("/oauth-protected-resource/*", (req, res) => {
+  log("WARN", "[WELL_KNOWN] Incorrect discovery URL with path suffix", {
+    path: req.path,
+    original_url: req.originalUrl,
+  });
+  // Redirect to correct endpoint
+  const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+  const baseUrl = `${protocol}://${req.get("host")}`;
+  res.redirect(301, `${baseUrl}/.well-known/oauth-protected-resource`);
+});
+
 /**
  * GET /.well-known/oauth-authorization-server
  * OAuth Authorization Server Metadata (RFC 8414)
  * Provides OAuth server configuration
  */
 router.get("/oauth-authorization-server", (req, res) => {
-  const baseUrl = req.protocol + "://" + req.get("host");
+  // Force HTTPS in production (Railway uses X-Forwarded-Proto)
+  const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
+  const baseUrl = `${protocol}://${req.get("host")}`;
 
   log("INFO", "[WELL_KNOWN] OAuth authorization server metadata requested", {
     base_url: baseUrl,
+    protocol: req.protocol,
+    forwarded_proto: req.get("x-forwarded-proto"),
     user_agent: req.get("user-agent"),
     ip: req.ip,
   });

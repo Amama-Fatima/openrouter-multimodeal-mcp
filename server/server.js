@@ -44,11 +44,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// Trust proxy (for Railway/Heroku/etc)
+app.set("trust proxy", true);
+
 // CORS middleware - must be before routes
 app.use(cors(config.cors));
 
+// Helper function for logging
+function log(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({ timestamp, level, message, ...data }));
+}
+
 // Handle preflight requests explicitly - must return 204, no redirects
+// This must come AFTER CORS middleware but handle OPTIONS before routes
 app.options("*", (req, res) => {
+  log("INFO", "[CORS_PREFLIGHT] Handling OPTIONS request", {
+    path: req.path,
+    origin: req.get("origin"),
+  });
+  // CORS middleware should have already set headers, just return 204
   res.status(204).end();
 });
 

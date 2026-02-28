@@ -80,7 +80,19 @@ router.options("/register", (req, res) => {
     origin: req.get("origin"),
     method: req.method,
     path: req.path,
+    headers: {
+      "access-control-request-method": req.get("access-control-request-method"),
+      "access-control-request-headers": req.get("access-control-request-headers"),
+    },
   });
+  
+  // Set CORS headers explicitly
+  res.header("Access-Control-Allow-Origin", req.get("origin") || "*");
+  res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Max-Age", "86400");
+  
   res.status(204).end();
 });
 
@@ -90,6 +102,14 @@ router.options("/register", (req, res) => {
  */
 router.post("/register", (req, res) => {
   logRequest(req, "OAUTH_REGISTER");
+  
+  // Set CORS headers for the response
+  const origin = req.get("origin");
+  if (origin) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Credentials", "true");
+  }
+  
   try {
     const clientMetadata = req.body;
     log("INFO", "[OAUTH_REGISTER] Registering new client", { clientMetadata });
