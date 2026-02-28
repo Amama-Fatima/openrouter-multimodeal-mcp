@@ -18,16 +18,29 @@ const SECRET_PATH = process.env.MCP_SECRET_PATH;
 // Request logging middleware (before routes to catch all requests)
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  console.log(JSON.stringify({
+  const logData = {
     timestamp,
     level: "INFO",
     message: "[HTTP_REQUEST]",
     method: req.method,
     path: req.path,
-    query: req.query,
+    query: Object.keys(req.query).length > 0 ? req.query : undefined,
+    headers: {
+      origin: req.get("origin"),
+      referer: req.get("referer"),
+      "content-type": req.get("content-type"),
+      "user-agent": req.get("user-agent"),
+    },
     ip: req.ip || req.connection.remoteAddress,
-    user_agent: req.get("user-agent"),
-  }));
+  };
+  
+  // Only log body for POST/PUT/PATCH and non-binary content
+  if (["POST", "PUT", "PATCH"].includes(req.method) && req.get("content-type")?.includes("application/json")) {
+    // Body will be available after express.json() middleware
+    // We'll log it separately in the route handlers
+  }
+  
+  console.log(JSON.stringify(logData));
   next();
 });
 
@@ -74,7 +87,23 @@ app.use("/.well-known", wellKnownRoutes);
 app.use("/oauth", oauthRoutes);
 
 // Protected MCP routes (require authentication)
-app.use(`/${SECRET_PATH}/`, validateSecretPath, mcpRoutes);
+if (SECRET_PATH) {
+  const mcpPath = `/${SECRET_PATH}/`;
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: "INFO",
+    message: "[ROUTE_SETUP] Registering MCP routes",
+    mcp_path: mcpPath,
+    secret_path: SECRET_PATH,
+  }));
+  app.use(mcpPath, validateSecretPath, mcpRoutes);
+} else {
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: "ERROR",
+    message: "[ROUTE_SETUP] MCP_SECRET_PATH not set - MCP routes not registered",
+  }));
+}
 
 // Debug routes
 app.use("/debug", debugRoutes);

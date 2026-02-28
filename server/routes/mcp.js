@@ -74,6 +74,10 @@ router.post("/mcp", verifyBearerToken, async (req, res) => {
   try {
     sessionId = generateSessionId(req);
   } catch (error) {
+    log("WARN", "[MCP_ENDPOINT] Session ID generation failed", {
+      error: error.message,
+      has_user: !!req.user,
+    });
     return res.status(401).json({
       jsonrpc: "2.0",
       id: message.id || null,

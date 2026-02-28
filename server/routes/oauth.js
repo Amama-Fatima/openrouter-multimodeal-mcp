@@ -78,6 +78,8 @@ setInterval(() => {
 router.options("/register", (req, res) => {
   log("INFO", "[OAUTH_REGISTER] CORS preflight request", {
     origin: req.get("origin"),
+    method: req.method,
+    path: req.path,
   });
   res.status(204).end();
 });
