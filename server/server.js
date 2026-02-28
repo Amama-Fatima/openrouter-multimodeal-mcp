@@ -15,13 +15,51 @@ const app = express();
 
 const SECRET_PATH = process.env.MCP_SECRET_PATH;
 
+// Request logging middleware (before routes to catch all requests)
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({
+    timestamp,
+    level: "INFO",
+    message: "[HTTP_REQUEST]",
+    method: req.method,
+    path: req.path,
+    query: req.query,
+    ip: req.ip || req.connection.remoteAddress,
+    user_agent: req.get("user-agent"),
+  }));
+  next();
+});
+
+// CORS middleware - must be before routes
 app.use(cors(config.cors));
+
+// Handle preflight requests explicitly - must return 204, no redirects
+app.options("*", (req, res) => {
+  res.status(204).end();
+});
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 const validateSecretPath = (req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({
+    timestamp,
+    level: "INFO",
+    message: "[SECRET_PATH_VALIDATION]",
+    path: req.path,
+    secret_path: SECRET_PATH,
+    path_segments: req.path.split("/"),
+  }));
+  
   if (!SECRET_PATH) {
-    console.error("⚠️  MCP_SECRET_PATH not configured!");
+    console.error(JSON.stringify({
+      timestamp,
+      level: "ERROR",
+      message: "[SECRET_PATH_VALIDATION] MCP_SECRET_PATH not configured",
+    }));
     return res.status(503).json({
       error: "Service misconfigured",
       message: "MCP_SECRET_PATH environment variable is required",
@@ -42,22 +80,6 @@ app.use(`/${SECRET_PATH}/`, validateSecretPath, mcpRoutes);
 app.use("/debug", debugRoutes);
 
 startSessionCleanup();
-
-// Add request logging middleware
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(JSON.stringify({
-    timestamp,
-    level: "INFO",
-    message: "[HTTP_REQUEST]",
-    method: req.method,
-    path: req.path,
-    query: req.query,
-    ip: req.ip || req.connection.remoteAddress,
-    user_agent: req.get("user-agent"),
-  }));
-  next();
-});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

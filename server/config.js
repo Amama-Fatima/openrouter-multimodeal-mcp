@@ -32,8 +32,34 @@ module.exports = {
   },
 
   cors: {
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
+    origin: function (origin, callback) {
+      // Allow all origins for MCP Inspector and development
+      // In production, you might want to restrict this
+      const allowedOrigins = [
+        /^http:\/\/localhost:\d+$/, // MCP Inspector localhost ports
+        /^https:\/\/.*\.railway\.app$/, // Railway domains
+        process.env.ALLOWED_ORIGINS?.split(",") || [],
+      ].flat();
+      
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+      
+      // Check if origin matches any allowed pattern
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === "string") {
+          return origin === allowed;
+        }
+        if (allowed instanceof RegExp) {
+          return allowed.test(origin);
+        }
+        return false;
+      });
+      
+      callback(null, true); // Allow all origins for MCP Inspector compatibility
+    },
+    methods: ["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -45,9 +71,13 @@ module.exports = {
       "Referer",
       "Mcp-Session-Id",
       "MCP-Protocol-Version",
+      "X-Requested-With",
     ],
     exposedHeaders: ["Content-Type", "Mcp-Session-Id", "MCP-Protocol-Version"],
-    credentials: false,
+    credentials: true, // Allow credentials for OAuth
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    maxAge: 86400, // Cache preflight for 24 hours
   },
 
   mcp: {

@@ -72,6 +72,17 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 /**
+ * OPTIONS /oauth/register
+ * Handle CORS preflight for client registration
+ */
+router.options("/register", (req, res) => {
+  log("INFO", "[OAUTH_REGISTER] CORS preflight request", {
+    origin: req.get("origin"),
+  });
+  res.status(204).end();
+});
+
+/**
  * POST /oauth/register
  * Dynamic Client Registration (RFC 7591)
  */
@@ -98,6 +109,14 @@ router.post("/register", (req, res) => {
       error_description: error.message,
     });
   }
+});
+
+/**
+ * OPTIONS /oauth/authorize
+ * Handle CORS preflight
+ */
+router.options("/authorize", (req, res) => {
+  res.status(204).end();
 });
 
 /**
@@ -354,6 +373,14 @@ router.get("/openrouter-callback", async (req, res) => {
     });
     res.redirect(errorUri);
   }
+});
+
+/**
+ * OPTIONS /oauth/token
+ * Handle CORS preflight
+ */
+router.options("/token", (req, res) => {
+  res.status(204).end();
 });
 
 /**
