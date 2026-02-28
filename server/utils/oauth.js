@@ -48,12 +48,14 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
     const requestData = {
       code,
       code_verifier: codeVerifier,
+      code_challenge_method: "S256", // OpenRouter requires this parameter
       callback_url: callbackUrl,
     };
 
     log("INFO", "[OPENROUTER_API] Sending request to OpenRouter", {
       url: "https://openrouter.ai/api/v1/auth/keys",
       has_code: !!code,
+      code_challenge_method: "S256",
     });
 
     const response = await axios.post(
@@ -96,10 +98,13 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
       stack: error.stack,
     });
     
+    // Extract error message more clearly
+    const errorMessage = error.response?.data?.error?.message 
+      || error.response?.data?.error 
+      || error.message;
+    
     throw new Error(
-      `Failed to exchange authorization code: ${
-        error.response?.data?.error || error.message
-      }`
+      `Failed to exchange authorization code: ${errorMessage}`
     );
   }
 }
