@@ -14,9 +14,8 @@ module.exports = {
   },
 
   openrouter: {
-    // API key is now optional - users authenticate via OAuth and get their own keys
-    // This is kept for backward compatibility or admin operations
-    apiKey: process.env.OPENROUTER_API_KEY,
+    // OAuth is required - users must authenticate via OAuth to get their own API keys
+    // No shared API key is used - each user authenticates individually
     defaultModel:
       process.env.OPENROUTER_DEFAULT_MODEL ||
       "qwen/qwen2.5-vl-32b-instruct:free",

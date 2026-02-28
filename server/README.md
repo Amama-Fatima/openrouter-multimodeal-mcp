@@ -19,10 +19,12 @@ cp .env.example .env
 
 3. Configure environment variables in `.env`:
 
-- `OPENROUTER_API_KEY`: (Optional) Your OpenRouter API key for backward compatibility. **OAuth is now the primary authentication method.**
 - `MCP_SECRET_PATH`: Secret path for securing the MCP endpoint (required)
 - `PORT`: Server port (default: 10000)
+- `OPENROUTER_DEFAULT_MODEL`: Default model to use (optional, defaults to `qwen/qwen2.5-vl-32b-instruct:free`)
 - `OAUTH_TOKEN_EXPIRATION`: Token expiration in milliseconds (optional, null = no expiration)
+
+**Note:** OAuth authentication is REQUIRED. No shared `OPENROUTER_API_KEY` is used. Each user must authenticate via OAuth to get their own API key.
 
 4. Build the main MCP server (from root directory):
 

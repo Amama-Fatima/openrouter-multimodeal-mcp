@@ -6,20 +6,19 @@ const { getSessionsInfo } = require("../sessionManager");
 
 // Health check endpoint
 router.get("/health", (req, res) => {
-  const hasApiKey = !!config.openrouter.apiKey;
-
   res.json({
     status: "healthy",
     service: "openrouter-mcp-server",
     timestamp: new Date().toISOString(),
     integrations: {
-      openrouter: hasApiKey ? "configured" : "missing",
+      openrouter: "oauth-required", // OAuth authentication required for all users
     },
     config: {
       requestTimeout: `${config.timeouts.REQUEST_TIMEOUT}ms`,
       sessionIdleTimeout: `${config.timeouts.SESSION_IDLE_TIMEOUT}ms`,
       sessionMaxLifetime: `${config.timeouts.SESSION_MAX_LIFETIME}ms`,
       defaultModel: config.openrouter.defaultModel,
+      authentication: "oauth-required", // All users must authenticate via OAuth
     },
     sessions: {
       active: getSessionsInfo().totalSessions,

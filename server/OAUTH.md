@@ -194,12 +194,14 @@ When configuring Claude Desktop to use this MCP server:
 
 ## Environment Variables
 
-The following environment variables are now **optional** (OAuth is the primary authentication method):
+The following environment variables are required/optional:
 
-- `OPENROUTER_API_KEY`: Optional - kept for backward compatibility or admin operations
-- `OPENROUTER_DEFAULT_MODEL`: Default model to use (defaults to `qwen/qwen2.5-vl-32b-instruct:free`)
-- `OAUTH_TOKEN_EXPIRATION`: Token expiration time in milliseconds (null = no expiration)
-- `MCP_SECRET_PATH`: Secret path for MCP endpoints (required for security)
+- `MCP_SECRET_PATH`: **Required** - Secret path for MCP endpoints (required for security)
+- `OPENROUTER_DEFAULT_MODEL`: Optional - Default model to use (defaults to `qwen/qwen2.5-vl-32b-instruct:free`)
+- `OAUTH_TOKEN_EXPIRATION`: Optional - Token expiration time in milliseconds (null = no expiration)
+- `PORT`: Optional - Server port (defaults to 10000)
+
+**Note:** `OPENROUTER_API_KEY` is **NOT used**. OAuth authentication is **REQUIRED** for all users. Each user authenticates individually and receives their own API key.
 
 ## Token Storage
 
@@ -225,13 +227,14 @@ Tokens are currently stored in-memory. For production deployments, consider:
 - Check that the callback URL matches what's registered
 - Verify PKCE code verifier is being stored correctly
 
-## Migration from Single-User Mode
+## OAuth-Only Mode
 
-If you were previously using a shared `OPENROUTER_API_KEY`:
+This server **requires** OAuth authentication. There is no fallback to a shared API key.
 
-1. **No breaking changes**: The server still works with a shared API key for backward compatibility
-2. **Enable OAuth**: Users can now authenticate individually via OAuth
-3. **Gradual migration**: You can run both modes simultaneously during migration
+- **All users must authenticate**: Each user completes the OAuth flow with OpenRouter
+- **Per-user API keys**: Each user receives their own OpenRouter API key
+- **No shared credentials**: No `OPENROUTER_API_KEY` environment variable is used
+- **Secure by default**: Multi-user isolation is enforced
 
 ## API Reference
 

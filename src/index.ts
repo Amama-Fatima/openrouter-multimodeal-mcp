@@ -13,11 +13,13 @@ const server = new McpServer({
 
 (async () => {
   try {
-    // Check for API key
+    // Check for API key (provided by HTTP server from user's OAuth session)
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       console.error(
-        "Error: OPENROUTER_API_KEY environment variable is required"
+        "Error: OPENROUTER_API_KEY environment variable is required. " +
+        "This should be set by the HTTP server from the user's OAuth session. " +
+        "If you see this error, the user may not be properly authenticated."
       );
       process.exit(1);
     }

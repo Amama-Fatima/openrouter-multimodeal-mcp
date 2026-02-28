@@ -183,29 +183,22 @@ app.listen(config.server.port, () => {
     `- Initialization Timeout: ${config.timeouts.INITIALIZATION_TIMEOUT}ms`
   );
 
-  // Validate environment
-  const hasApiKey = !!config.openrouter.apiKey;
-
   console.log("\nEnvironment Variables:");
-  console.log(
-    `OpenRouter API Key: ${
-      hasApiKey ? "✓ Configured (optional - users authenticate via OAuth)" : "✗ Not set (OAuth required)"
-    }`
-  );
   console.log(`Default Model: ${config.openrouter.defaultModel}`);
 
   console.log("\nOAuth Configuration:");
-  console.log(`✓ OAuth enabled - Users authenticate with OpenRouter`);
-  console.log(`  Login: http://localhost:${config.server.port}/oauth/login`);
-  console.log(`  Callback: http://localhost:${config.server.port}/oauth/callback`);
-  console.log(`  Status: http://localhost:${config.server.port}/oauth/status`);
+  console.log(`✓ OAuth REQUIRED - All users must authenticate with OpenRouter`);
+  console.log(`  Authorization: ${baseUrl}/oauth/authorize`);
+  console.log(`  Token: ${baseUrl}/oauth/token`);
+  console.log(`  Registration: ${baseUrl}/oauth/register`);
+  console.log(`  Status: ${baseUrl}/oauth/status`);
   console.log(`\nMCP Discovery:`);
-  console.log(`  OAuth Metadata: http://localhost:${config.server.port}/.well-known/oauth-protected-resource`);
+  console.log(`  OAuth Metadata: ${baseUrl}/.well-known/oauth-protected-resource`);
+  console.log(`  OAuth Server: ${baseUrl}/.well-known/oauth-authorization-server`);
 
-  if (!hasApiKey) {
-    console.log("\nℹ️  INFO: OPENROUTER_API_KEY not set - this is OK");
-    console.log("   Users will authenticate via OAuth and use their own API keys");
-  }
+  console.log("\n⚠️  IMPORTANT: OAuth authentication is REQUIRED");
+  console.log("   No shared API key is used - each user authenticates individually");
+  console.log("   Users must complete OAuth flow before accessing MCP endpoints");
 });
 
 process.on("SIGTERM", () => {
