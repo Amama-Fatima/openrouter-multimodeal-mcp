@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const config = require("../config");
+const { verifyBearerToken } = require("../middleware/auth");
 const {
   generateSessionId,
   getOrCreateSession,
@@ -15,24 +16,36 @@ const {
 } = require("../mcpHandler");
 
 // SSE listener endpoint for server-to-client messages
-router.get("/mcp", (req, res) => {
-  const sessionId = generateSessionId(req);
-  console.log(`SSE stream opened for session ${sessionId}`);
+// Requires authentication via Bearer token
+router.get("/mcp", verifyBearerToken, (req, res) => {
+  try {
+    const sessionId = generateSessionId(req);
+    console.log(`SSE stream opened for session ${sessionId} (user: ${req.user.userId})`);
 
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
-    "Mcp-Session-Id": sessionId,
-    "MCP-Protocol-Version": config.mcp.protocolVersion,
-  });
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
+      "Mcp-Session-Id": sessionId,
+      "MCP-Protocol-Version": config.mcp.protocolVersion,
+    });
 
-  res.write(`: Connected to session ${sessionId}\n\n`);
+    res.write(`: Connected to session ${sessionId}\n\n`);
 
-  const sessionData = getOrCreateSession(sessionId);
-  sessionData.sseRes = res;
+    const sessionData = getOrCreateSession(sessionId, req);
+    sessionData.sseRes = res;
+  } catch (error) {
+    console.error("Error setting up SSE:", error);
+    if (!res.headersSent) {
+      res.status(401).json({
+        error: "Authentication required",
+        message: error.message,
+      });
+    }
+    return;
+  }
 
   // Keep-alive pings
   const keepAlive = setInterval(() => {
@@ -53,12 +66,28 @@ router.get("/mcp", (req, res) => {
 });
 
 // Main MCP endpoint (POST)
-router.post("/mcp", async (req, res) => {
+// Requires authentication via Bearer token
+router.post("/mcp", verifyBearerToken, async (req, res) => {
   const message = req.body;
-  const sessionId = generateSessionId(req);
+  let sessionId;
+
+  try {
+    sessionId = generateSessionId(req);
+  } catch (error) {
+    return res.status(401).json({
+      jsonrpc: "2.0",
+      id: message.id || null,
+      error: {
+        code: -32000,
+        message: "Authentication required",
+        data: error.message,
+      },
+    });
+  }
 
   console.log("=== Received MCP request ===");
   console.log("Session:", sessionId);
+  console.log("User:", req.user.userId);
   console.log("Method:", message.method);
   console.log("ID:", message.id);
   console.log("Params:", JSON.stringify(message.params, null, 2));
@@ -85,8 +114,23 @@ router.post("/mcp", async (req, res) => {
     });
   }
 
-  // Get or create session
-  const sessionData = getOrCreateSession(sessionId);
+  // Get or create session (requires req.user from auth middleware)
+  let sessionData;
+  try {
+    sessionData = getOrCreateSession(sessionId, req);
+  } catch (error) {
+    console.error("Error getting/creating session:", error);
+    return res.status(401).json({
+      jsonrpc: "2.0",
+      id: message.id || null,
+      error: {
+        code: -32000,
+        message: "Authentication required",
+        data: error.message,
+      },
+    });
+  }
+
   const mcpProcess = sessionData.process;
 
   if (!mcpProcess || mcpProcess.killed) {

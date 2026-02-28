@@ -14,10 +14,21 @@ module.exports = {
   },
 
   openrouter: {
+    // API key is now optional - users authenticate via OAuth and get their own keys
+    // This is kept for backward compatibility or admin operations
     apiKey: process.env.OPENROUTER_API_KEY,
     defaultModel:
       process.env.OPENROUTER_DEFAULT_MODEL ||
       "qwen/qwen2.5-vl-32b-instruct:free",
+  },
+
+  oauth: {
+    // OAuth callback URL (can be overridden by request host)
+    callbackPath: "/oauth/callback",
+    // Token expiration (null = no expiration)
+    tokenExpiration: process.env.OAUTH_TOKEN_EXPIRATION
+      ? parseInt(process.env.OAUTH_TOKEN_EXPIRATION)
+      : null,
   },
 
   cors: {

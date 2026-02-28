@@ -1,12 +1,15 @@
 // server.js
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const config = require("./config");
 const { startSessionCleanup, cleanupAllSessions } = require("./sessionManager");
 
 const healthRoutes = require("./routes/health");
 const mcpRoutes = require("./routes/mcp");
 const debugRoutes = require("./routes/debug");
+const oauthRoutes = require("./routes/oauth");
+const wellKnownRoutes = require("./routes/well-known");
 
 const app = express();
 
@@ -14,6 +17,7 @@ const SECRET_PATH = process.env.MCP_SECRET_PATH;
 
 app.use(cors(config.cors));
 app.use(express.json());
+app.use(cookieParser());
 
 const validateSecretPath = (req, res, next) => {
   if (!SECRET_PATH) {
@@ -26,9 +30,15 @@ const validateSecretPath = (req, res, next) => {
   next();
 };
 
+// Public routes
 app.use("/", healthRoutes);
+app.use("/.well-known", wellKnownRoutes);
+app.use("/oauth", oauthRoutes);
+
+// Protected MCP routes (require authentication)
 app.use(`/${SECRET_PATH}/`, validateSecretPath, mcpRoutes);
 
+// Debug routes
 app.use("/debug", debugRoutes);
 
 startSessionCleanup();
@@ -60,14 +70,22 @@ app.listen(config.server.port, () => {
   console.log("\nEnvironment Variables:");
   console.log(
     `OpenRouter API Key: ${
-      hasApiKey ? "✓ Configured" : "✗ Missing OPENROUTER_API_KEY"
+      hasApiKey ? "✓ Configured (optional - users authenticate via OAuth)" : "✗ Not set (OAuth required)"
     }`
   );
   console.log(`Default Model: ${config.openrouter.defaultModel}`);
 
+  console.log("\nOAuth Configuration:");
+  console.log(`✓ OAuth enabled - Users authenticate with OpenRouter`);
+  console.log(`  Login: http://localhost:${config.server.port}/oauth/login`);
+  console.log(`  Callback: http://localhost:${config.server.port}/oauth/callback`);
+  console.log(`  Status: http://localhost:${config.server.port}/oauth/status`);
+  console.log(`\nMCP Discovery:`);
+  console.log(`  OAuth Metadata: http://localhost:${config.server.port}/.well-known/oauth-protected-resource`);
+
   if (!hasApiKey) {
-    console.error("\n⚠️  WARNING: Missing required environment variables");
-    console.error("Set OPENROUTER_API_KEY");
+    console.log("\nℹ️  INFO: OPENROUTER_API_KEY not set - this is OK");
+    console.log("   Users will authenticate via OAuth and use their own API keys");
   }
 });
 
