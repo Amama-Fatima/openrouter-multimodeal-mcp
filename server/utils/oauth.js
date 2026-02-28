@@ -33,14 +33,32 @@ function generatePKCE() {
  * @returns {Promise<Object>} { apiKey, userId, expiresAt }
  */
 async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
+  const log = (level, message, data = {}) => {
+    const timestamp = new Date().toISOString();
+    console.log(JSON.stringify({ timestamp, level, message, ...data }));
+  };
+
+  log("INFO", "[OPENROUTER_API] Exchanging code for API key", {
+    callback_url: callbackUrl,
+    has_code: !!code,
+    has_code_verifier: !!codeVerifier,
+  });
+
   try {
+    const requestData = {
+      code,
+      code_verifier: codeVerifier,
+      callback_url: callbackUrl,
+    };
+
+    log("INFO", "[OPENROUTER_API] Sending request to OpenRouter", {
+      url: "https://openrouter.ai/api/v1/auth/keys",
+      has_code: !!code,
+    });
+
     const response = await axios.post(
       "https://openrouter.ai/api/v1/auth/keys",
-      {
-        code,
-        code_verifier: codeVerifier,
-        callback_url: callbackUrl,
-      },
+      requestData,
       {
         headers: {
           "Content-Type": "application/json",
@@ -49,15 +67,35 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
       }
     );
 
-    return {
+    log("INFO", "[OPENROUTER_API] OpenRouter response received", {
+      status: response.status,
+      has_key: !!response.data?.key,
+      has_user_id: !!(response.data?.user_id || response.data?.id),
+    });
+
+    const result = {
       apiKey: response.data.key,
       userId: response.data.user_id || response.data.id,
       expiresAt: response.data.expires_at
         ? new Date(response.data.expires_at)
         : null,
     };
+
+    log("INFO", "[OPENROUTER_API] Code exchange successful", {
+      user_id: result.userId,
+      has_api_key: !!result.apiKey,
+    });
+
+    return result;
   } catch (error) {
-    console.error("Error exchanging code for API key:", error.response?.data || error.message);
+    log("ERROR", "[OPENROUTER_API] Error exchanging code for API key", {
+      error: error.message,
+      status: error.response?.status,
+      status_text: error.response?.statusText,
+      response_data: error.response?.data,
+      stack: error.stack,
+    });
+    
     throw new Error(
       `Failed to exchange authorization code: ${
         error.response?.data?.error || error.message

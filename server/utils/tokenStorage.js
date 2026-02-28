@@ -6,6 +6,12 @@ const refreshTokenStore = new Map(); // refresh_token -> { userId, clientId, sco
 const userTokenMap = new Map(); // userId -> Set of tokens
 const authorizationCodes = new Map(); // code -> { userId, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt }
 
+// Enhanced logging
+function log(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({ timestamp, level, message, ...data }));
+}
+
 /**
  * Store an access token with associated user API key
  * @param {string} accessToken - Access token (JWT)
@@ -45,7 +51,12 @@ function storeAccessToken(accessToken, refreshToken, apiKey, userId, clientId, s
   }
   userTokenMap.get(userId).add(accessToken);
 
-  console.log(`Stored access token for user ${userId}, client ${clientId}`);
+  log("INFO", "[TOKEN_STORAGE] Access token stored", {
+    user_id: userId,
+    client_id: clientId,
+    scopes,
+    has_refresh_token: !!refreshToken,
+  });
 }
 
 /**
@@ -74,9 +85,19 @@ function storeAuthorizationCode(code, userId, apiKey, clientId, redirectUri, cod
     createdAt: Date.now(),
   });
   
+  log("INFO", "[TOKEN_STORAGE] Authorization code stored", {
+    code: code.substring(0, 10) + "...",
+    user_id: userId,
+    client_id: clientId,
+    expires_in: expiresIn,
+  });
+  
   // Clean up expired codes periodically
   setTimeout(() => {
     authorizationCodes.delete(code);
+    log("INFO", "[TOKEN_STORAGE] Authorization code expired and cleaned up", {
+      code: code.substring(0, 10) + "...",
+    });
   }, expiresIn * 1000);
 }
 
@@ -114,6 +135,12 @@ function consumeAuthorizationCode(code, codeVerifier) {
 
   // Consume code (delete it)
   authorizationCodes.delete(code);
+
+  log("INFO", "[TOKEN_STORAGE] Authorization code consumed", {
+    code: code.substring(0, 10) + "...",
+    user_id: codeData.userId,
+    client_id: codeData.clientId,
+  });
 
   return codeData;
 }

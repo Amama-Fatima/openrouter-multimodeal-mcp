@@ -43,12 +43,65 @@ app.use("/debug", debugRoutes);
 
 startSessionCleanup();
 
+// Add request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({
+    timestamp,
+    level: "INFO",
+    message: "[HTTP_REQUEST]",
+    method: req.method,
+    path: req.path,
+    query: req.query,
+    ip: req.ip || req.connection.remoteAddress,
+    user_agent: req.get("user-agent"),
+  }));
+  next();
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.error(JSON.stringify({
+    timestamp,
+    level: "ERROR",
+    message: "[UNHANDLED_ERROR]",
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+  }));
+  
+  res.status(err.status || 500).json({
+    error: "Internal Server Error",
+    message: process.env.NODE_ENV === "production" 
+      ? "An error occurred" 
+      : err.message,
+  });
+});
+
 app.listen(config.server.port, () => {
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN 
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${config.server.port}`;
+  
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: "INFO",
+    message: "[SERVER_START] OpenRouter MCP Server started",
+    port: config.server.port,
+    base_url: baseUrl,
+  }));
+  
   console.log(`OpenRouter MCP Server running on port ${config.server.port}`);
-  console.log(`Health check: http://localhost:${config.server.port}/health`);
-  console.log(`MCP endpoint: POST http://localhost:${config.server.port}/mcp`);
+  console.log(`Base URL: ${baseUrl}`);
+  console.log(`Health check: ${baseUrl}/health`);
+  console.log(`MCP endpoint: POST ${baseUrl}/${process.env.MCP_SECRET_PATH || 'SECRET_PATH'}/mcp`);
+  console.log(`OAuth authorize: ${baseUrl}/oauth/authorize`);
+  console.log(`OAuth token: ${baseUrl}/oauth/token`);
+  console.log(`OAuth discovery: ${baseUrl}/.well-known/oauth-authorization-server`);
   console.log(
-    `Sessions debug: http://localhost:${config.server.port}/debug/sessions`
+    `Sessions debug: ${baseUrl}/debug/sessions`
   );
   console.log("Using local MCP from /dist/index.js");
 

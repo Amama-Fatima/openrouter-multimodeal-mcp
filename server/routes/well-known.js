@@ -5,6 +5,12 @@ const express = require("express");
 const router = express.Router();
 const config = require("../config");
 
+// Enhanced logging
+function log(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({ timestamp, level, message, ...data }));
+}
+
 /**
  * GET /.well-known/oauth-protected-resource
  * OAuth Protected Resource Metadata (RFC 9728)
@@ -12,6 +18,12 @@ const config = require("../config");
  */
 router.get("/oauth-protected-resource", (req, res) => {
   const baseUrl = req.protocol + "://" + req.get("host");
+
+  log("INFO", "[WELL_KNOWN] OAuth protected resource metadata requested", {
+    base_url: baseUrl,
+    user_agent: req.get("user-agent"),
+    ip: req.ip,
+  });
 
   res.json({
     resource: baseUrl,
@@ -38,6 +50,12 @@ router.get("/oauth-protected-resource", (req, res) => {
  */
 router.get("/oauth-authorization-server", (req, res) => {
   const baseUrl = req.protocol + "://" + req.get("host");
+
+  log("INFO", "[WELL_KNOWN] OAuth authorization server metadata requested", {
+    base_url: baseUrl,
+    user_agent: req.get("user-agent"),
+    ip: req.ip,
+  });
 
   res.json({
     issuer: baseUrl,
