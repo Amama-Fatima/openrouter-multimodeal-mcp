@@ -21,12 +21,12 @@ router.get("/oauth-protected-resource", (req, res) => {
   const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
   const baseUrl = `${protocol}://${req.get("host")}`;
 
-  log("INFO", "[WELL_KNOWN] OAuth protected resource metadata requested", {
+  log("INFO", "[AUTH_FLOW] Step: discovery_protected_resource", {
+    flow_phase: "discovery",
+    step: "oauth_protected_resource",
     base_url: baseUrl,
     protocol: req.protocol,
-    forwarded_proto: req.get("x-forwarded-proto"),
-    user_agent: req.get("user-agent"),
-    ip: req.ip,
+    user_agent: req.get("user-agent") ? req.get("user-agent").substring(0, 60) + "..." : null,
   });
 
   res.json({
@@ -69,12 +69,11 @@ router.get("/oauth-authorization-server", (req, res) => {
   const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
   const baseUrl = `${protocol}://${req.get("host")}`;
 
-  log("INFO", "[WELL_KNOWN] OAuth authorization server metadata requested", {
+  log("INFO", "[AUTH_FLOW] Step: discovery_authorization_server", {
+    flow_phase: "discovery",
+    step: "oauth_authorization_server",
     base_url: baseUrl,
     protocol: req.protocol,
-    forwarded_proto: req.get("x-forwarded-proto"),
-    user_agent: req.get("user-agent"),
-    ip: req.ip,
   });
 
   res.json({

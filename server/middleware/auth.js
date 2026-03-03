@@ -15,7 +15,9 @@ function log(level, message, data = {}) {
 function verifyBearerToken(req, res, next) {
   const authHeader = req.headers.authorization;
 
-  log("INFO", "[AUTH_MIDDLEWARE] Verifying Bearer token", {
+  log("INFO", "[AUTH_FLOW] Step: auth_middleware_verify", {
+    flow_phase: "auth_middleware",
+    step: "verify_start",
     path: req.path,
     method: req.method,
     has_auth_header: !!authHeader,
@@ -23,7 +25,9 @@ function verifyBearerToken(req, res, next) {
   });
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    log("WARN", "[AUTH_MIDDLEWARE] Missing or invalid Authorization header", {
+    log("WARN", "[AUTH_FLOW] Step: auth_middleware_no_bearer", {
+      flow_phase: "auth_middleware",
+      step: "missing_or_invalid_header",
       path: req.path,
       auth_header: authHeader ? "present but invalid format" : "missing",
     });
@@ -35,65 +39,100 @@ function verifyBearerToken(req, res, next) {
 
   const token = authHeader.substring(7);
 
-  log("INFO", "[AUTH_MIDDLEWARE] Token extracted", {
+  log("INFO", "[AUTH_FLOW] Step: auth_middleware_token_extracted", {
+    flow_phase: "auth_middleware",
+    step: "token_extracted",
     token_preview: token.substring(0, 20) + "...",
+    path: req.path,
   });
 
   const decoded = verifyAccessToken(token);
-  log("INFO", "[AUTH_MIDDLEWARE] Token verification attempt", { is_jwt_valid: !!decoded });
+  log("INFO", "[AUTH_FLOW] Step: auth_middleware_jwt_check", {
+    flow_phase: "auth_middleware",
+    step: "jwt_verify",
+    is_jwt_valid: !!decoded,
+    path: req.path,
+  });
 
   (async () => {
     let tokenData = null;
-    if (decoded) {
-      tokenData = await getAccessToken(token);
+    try {
+      if (decoded) {
+        tokenData = await getAccessToken(token);
+        if (!tokenData) {
+          log("WARN", "[AUTH_FLOW] Step: auth_middleware_rejected", {
+            flow_phase: "auth_middleware",
+            step: "jwt_valid_not_in_storage",
+            decoded_user_id: decoded.sub,
+            decoded_client_id: decoded.client_id,
+            reason: "token_not_found_in_storage",
+          });
+          return res.status(401).json({
+            error: "Unauthorized",
+            message: "Token not found in storage",
+          });
+        }
+        log("INFO", "[AUTH_FLOW] Step: auth_middleware_success", {
+          flow_phase: "auth_middleware",
+          step: "jwt_validated",
+          user_id: tokenData.userId,
+          client_id: tokenData.clientId,
+          path: req.path,
+        });
+      } else {
+        tokenData = await getAccessToken(token);
+        if (tokenData) {
+          log("INFO", "[AUTH_FLOW] Step: auth_middleware_success", {
+            flow_phase: "auth_middleware",
+            step: "opaque_token_validated",
+            user_id: tokenData.userId,
+            client_id: tokenData.clientId,
+            path: req.path,
+          });
+        }
+      }
+
       if (!tokenData) {
-        log("WARN", "[AUTH_MIDDLEWARE] JWT valid but not found in storage", {
-          decoded_user_id: decoded.sub,
-          decoded_client_id: decoded.client_id,
+        log("WARN", "[AUTH_FLOW] Step: auth_middleware_rejected", {
+          flow_phase: "auth_middleware",
+          step: "token_invalid_or_expired",
+          path: req.path,
+          reason: "invalid_or_expired",
         });
         return res.status(401).json({
           error: "Unauthorized",
-          message: "Token not found in storage",
+          message: "Invalid or expired token",
         });
       }
-      log("INFO", "[AUTH_MIDDLEWARE] JWT token validated", {
-        user_id: tokenData.userId,
-        client_id: tokenData.clientId,
+
+      req.user = {
+        userId: tokenData.userId,
+        apiKey: tokenData.apiKey,
+        clientId: tokenData.clientId,
+        scopes: tokenData.scopes || [],
+        token: token,
+      };
+
+      log("INFO", "[AUTH_FLOW] Step: auth_middleware_done", {
+        flow_phase: "auth_middleware",
+        step: "authenticated",
+        user_id: req.user.userId,
+        client_id: req.user.clientId,
+        path: req.path,
       });
-    } else {
-      tokenData = await getAccessToken(token);
-      if (tokenData) {
-        log("INFO", "[AUTH_MIDDLEWARE] Opaque token validated", {
-          user_id: tokenData.userId,
-          client_id: tokenData.clientId,
-        });
-      }
-    }
 
-    if (!tokenData) {
-      log("WARN", "[AUTH_MIDDLEWARE] Token validation failed", { path: req.path });
-      return res.status(401).json({
-        error: "Unauthorized",
-        message: "Invalid or expired token",
+      next();
+    } catch (err) {
+      log("ERROR", "[AUTH_FLOW] Step: auth_middleware_error", {
+        flow_phase: "auth_middleware",
+        step: "storage_error",
+        path: req.path,
+        error: err.message,
+        stack: err.stack,
       });
+      next(err);
     }
-
-    req.user = {
-      userId: tokenData.userId,
-      apiKey: tokenData.apiKey,
-      clientId: tokenData.clientId,
-      scopes: tokenData.scopes || [],
-      token: token,
-    };
-
-    log("INFO", "[AUTH_MIDDLEWARE] Authentication successful", {
-      user_id: req.user.userId,
-      client_id: req.user.clientId,
-      path: req.path,
-    });
-
-    next();
-  })().catch((err) => next(err));
+  })();
 }
 
 /**

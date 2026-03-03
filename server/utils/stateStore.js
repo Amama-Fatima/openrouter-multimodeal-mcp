@@ -8,6 +8,11 @@ const { getRedisClient, isRedisEnabled } = require("./redisClient");
 const STATE_TTL_SEC = 600; // 10 minutes
 const KEY_PREFIX = "oauth:state:";
 
+function authLog(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({ timestamp, level, message, flow_phase: "oauth_state", ...data }));
+}
+
 // In-memory fallback (per-replica)
 const memoryStore = new Map();
 const MEMORY_TTL_MS = STATE_TTL_SEC * 1000;
@@ -20,6 +25,10 @@ function cleanupMemoryStore() {
 }
 setInterval(cleanupMemoryStore, 5 * 60 * 1000);
 
+function statePreview(s) {
+  return s && s.length >= 12 ? s.substring(0, 12) + "..." : (s || "");
+}
+
 /**
  * Store OAuth state (used when redirecting to OpenRouter).
  * @param {string} state - State parameter
@@ -29,14 +38,39 @@ setInterval(cleanupMemoryStore, 5 * 60 * 1000);
  */
 async function setState(state, data, ttlSec = STATE_TTL_SEC) {
   const payload = { ...data, timestamp: Date.now() };
+  const preview = statePreview(state);
   if (isRedisEnabled()) {
-    const redis = await getRedisClient();
-    if (redis) {
-      await redis.set(KEY_PREFIX + state, JSON.stringify(payload), { EX: ttlSec });
-      return;
+    try {
+      const redis = await getRedisClient();
+      if (redis) {
+        await redis.set(KEY_PREFIX + state, JSON.stringify(payload), { EX: ttlSec });
+        authLog("INFO", "[AUTH_FLOW] OAuth state stored (Redis)", {
+          operation: "set",
+          backend: "redis",
+          state_preview: preview,
+          client_id: data.clientId,
+          ttl_sec: ttlSec,
+        });
+        return;
+      }
+    } catch (err) {
+      authLog("ERROR", "[AUTH_FLOW] OAuth state set failed (Redis)", {
+        operation: "set",
+        backend: "redis",
+        state_preview: preview,
+        error: err.message,
+      });
+      throw err;
     }
   }
   memoryStore.set(state, payload);
+  authLog("INFO", "[AUTH_FLOW] OAuth state stored (memory)", {
+    operation: "set",
+    backend: "memory",
+    state_preview: preview,
+    client_id: data.clientId,
+    ttl_sec: ttlSec,
+  });
 }
 
 /**
@@ -45,21 +79,53 @@ async function setState(state, data, ttlSec = STATE_TTL_SEC) {
  * @returns {Promise<Object|null>} Stored data or null
  */
 async function getState(state) {
+  const preview = statePreview(state);
   if (isRedisEnabled()) {
-    const redis = await getRedisClient();
-    if (redis) {
-      const raw = await redis.get(KEY_PREFIX + state);
-      if (!raw) return null;
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return null;
+    try {
+      const redis = await getRedisClient();
+      if (redis) {
+        const raw = await redis.get(KEY_PREFIX + state);
+        const found = !!raw;
+        authLog("INFO", "[AUTH_FLOW] OAuth state lookup (Redis)", {
+          operation: "get",
+          backend: "redis",
+          state_preview: preview,
+          found,
+        });
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          authLog("WARN", "[AUTH_FLOW] OAuth state parse failed (Redis)", {
+            operation: "get",
+            state_preview: preview,
+            reason: "invalid_json",
+          });
+          return null;
+        }
       }
+    } catch (err) {
+      authLog("ERROR", "[AUTH_FLOW] OAuth state get failed (Redis)", {
+        operation: "get",
+        backend: "redis",
+        state_preview: preview,
+        error: err.message,
+      });
+      throw err;
     }
   }
   const entry = memoryStore.get(state);
+  const found = !!entry;
+  const expired = entry && Date.now() - entry.timestamp > MEMORY_TTL_MS;
+  authLog("INFO", "[AUTH_FLOW] OAuth state lookup (memory)", {
+    operation: "get",
+    backend: "memory",
+    state_preview: preview,
+    found: found && !expired,
+    expired: !!expired,
+  });
   if (!entry) return null;
-  if (Date.now() - entry.timestamp > MEMORY_TTL_MS) {
+  if (expired) {
     memoryStore.delete(state);
     return null;
   }
@@ -72,12 +138,23 @@ async function getState(state) {
  * @returns {Promise<void>}
  */
 async function deleteState(state) {
+  const preview = statePreview(state);
   if (isRedisEnabled()) {
     const redis = await getRedisClient();
     if (redis) await redis.del(KEY_PREFIX + state);
+    authLog("INFO", "[AUTH_FLOW] OAuth state deleted (Redis)", {
+      operation: "delete",
+      backend: "redis",
+      state_preview: preview,
+    });
     return;
   }
   memoryStore.delete(state);
+  authLog("INFO", "[AUTH_FLOW] OAuth state deleted (memory)", {
+    operation: "delete",
+    backend: "memory",
+    state_preview: preview,
+  });
 }
 
 module.exports = {

@@ -38,7 +38,9 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
     console.log(JSON.stringify({ timestamp, level, message, ...data }));
   };
 
-  log("INFO", "[OPENROUTER_API] Exchanging code for API key", {
+  log("INFO", "[AUTH_FLOW] Step: openrouter_exchange_start", {
+    flow_phase: "openrouter_api",
+    step: "exchange_code_for_key",
     callback_url: callbackUrl,
     has_code: !!code,
     has_code_verifier: !!codeVerifier,
@@ -69,7 +71,9 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
       }
     );
 
-    log("INFO", "[OPENROUTER_API] OpenRouter response received", {
+    log("INFO", "[AUTH_FLOW] Step: openrouter_exchange_success", {
+      flow_phase: "openrouter_api",
+      step: "exchange_done",
       status: response.status,
       has_key: !!response.data?.key,
       has_user_id: !!(response.data?.user_id || response.data?.id),
@@ -83,14 +87,18 @@ async function exchangeCodeForApiKey(code, codeVerifier, callbackUrl) {
         : null,
     };
 
-    log("INFO", "[OPENROUTER_API] Code exchange successful", {
+    log("INFO", "[AUTH_FLOW] Step: openrouter_exchange_result", {
+      flow_phase: "openrouter_api",
+      step: "exchange_result",
       user_id: result.userId,
       has_api_key: !!result.apiKey,
     });
 
     return result;
   } catch (error) {
-    log("ERROR", "[OPENROUTER_API] Error exchanging code for API key", {
+    log("ERROR", "[AUTH_FLOW] Step: openrouter_exchange_failed", {
+      flow_phase: "openrouter_api",
+      step: "exchange_error",
       error: error.message,
       status: error.response?.status,
       status_text: error.response?.statusText,

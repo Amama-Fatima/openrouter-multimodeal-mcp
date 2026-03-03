@@ -115,12 +115,14 @@ router.post("/mcp", verifyBearerToken, async (req, res) => {
     });
   }
 
-  log("INFO", "[MCP_ENDPOINT] Received MCP request", {
+  log("INFO", "[AUTH_FLOW] Step: mcp_request_authenticated", {
+    flow_phase: "mcp",
+    step: "request_after_auth",
     session_id: sessionId,
     user_id: req.user.userId,
+    client_id: req.user.clientId,
     method: message.method,
     message_id: message.id,
-    has_params: !!message.params,
   });
 
   res.setHeader("Mcp-Session-Id", sessionId);

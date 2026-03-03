@@ -146,14 +146,16 @@ router.get("/authorize", async (req, res) => {
     state,
   } = req.query;
 
-  log("INFO", "[OAUTH_AUTHORIZE] Processing authorization request", {
+  log("INFO", "[AUTH_FLOW] Step: authorize_start", {
+    flow_phase: "auth_flow",
+    step: "authorize",
     client_id,
-    redirect_uri,
+    redirect_uri: redirect_uri ? redirect_uri.substring(0, 60) + (redirect_uri.length > 60 ? "..." : "") : null,
     response_type,
     scope,
     has_code_challenge: !!code_challenge,
     code_challenge_method,
-    state,
+    has_state: !!state,
   });
 
   // Validate required parameters
@@ -236,24 +238,35 @@ router.get("/authorize", async (req, res) => {
   };
   try {
     await setState(orState, stateData);
+    log("INFO", "[AUTH_FLOW] Step: authorize_state_stored", {
+      flow_phase: "auth_flow",
+      step: "authorize_state_stored",
+      or_state_preview: orState.substring(0, 12) + "...",
+      client_id: client_id,
+    });
   } catch (err) {
-    logError("OAUTH_AUTHORIZE", err, { orState: orState.substring(0, 10) + "..." });
+    logError("OAUTH_AUTHORIZE", err, {
+      flow_phase: "auth_flow",
+      step: "authorize_state_store_failed",
+      or_state_preview: orState.substring(0, 12) + "...",
+    });
     return res.status(503).json({
       error: "server_error",
       error_description: "Failed to store OAuth state",
     });
   }
 
-  // Build OpenRouter authorization URL
   const baseUrl = req.protocol + "://" + req.get("host");
   const callbackUrl = `${baseUrl}/oauth/openrouter-callback`;
   const openRouterAuthUrl = buildAuthorizationUrl(callbackUrl, orCodeChallenge);
   const openRouterAuthUrlWithState = `${openRouterAuthUrl}&state=${orState}`;
 
-  log("INFO", "[OAUTH_AUTHORIZE] Redirecting to OpenRouter", {
+  log("INFO", "[AUTH_FLOW] Step: authorize_redirect_to_openrouter", {
+    flow_phase: "auth_flow",
+    step: "authorize_redirect",
     client_id,
     callback_url: callbackUrl,
-    openrouter_auth_url: openRouterAuthUrlWithState.substring(0, 100) + "...",
+    or_state_preview: orState.substring(0, 12) + "...",
   });
 
   res.redirect(openRouterAuthUrlWithState);
@@ -265,13 +278,16 @@ router.get("/authorize", async (req, res) => {
  */
 router.get("/openrouter-callback", async (req, res) => {
   logRequest(req, "OAUTH_OPENROUTER_CALLBACK");
-  
+
   const { code: orCode, state: orState, error } = req.query;
-  
-  log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Received callback from OpenRouter", {
+
+  log("INFO", "[AUTH_FLOW] Step: callback_received", {
+    flow_phase: "auth_flow",
+    step: "openrouter_callback",
     has_code: !!orCode,
     has_state: !!orState,
-    error,
+    state_preview: orState ? orState.substring(0, 12) + "..." : null,
+    error: error || null,
   });
 
   // Handle errors from OpenRouter
@@ -307,11 +323,18 @@ router.get("/openrouter-callback", async (req, res) => {
     });
   }
 
-  // Retrieve OpenRouter auth data (from Redis when REDIS_URL set, so any replica can find it)
+  log("INFO", "[AUTH_FLOW] Step: callback_state_lookup", {
+    flow_phase: "auth_flow",
+    step: "callback_lookup_state",
+    state_preview: orState ? orState.substring(0, 12) + "..." : null,
+  });
+
   const authData = await getState(orState);
   if (!authData) {
-    log("WARN", "[OAUTH_OPENROUTER_CALLBACK] Invalid or expired state", {
-      state: orState,
+    log("WARN", "[AUTH_FLOW] Step: callback_state_missing", {
+      flow_phase: "auth_flow",
+      step: "callback_state_not_found",
+      state_preview: orState ? orState.substring(0, 12) + "..." : null,
       hint: process.env.REDIS_URL ? "Check Redis connectivity" : "With multiple replicas, set REDIS_URL for shared state",
     });
     return res.status(400).json({
@@ -320,19 +343,22 @@ router.get("/openrouter-callback", async (req, res) => {
     });
   }
 
-  log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Found auth data", {
+  log("INFO", "[AUTH_FLOW] Step: callback_state_found", {
+    flow_phase: "auth_flow",
+    step: "callback_state_ok",
     client_id: authData.clientId,
-    redirect_uri: authData.redirectUri,
+    redirect_uri_preview: authData.redirectUri ? authData.redirectUri.substring(0, 50) + "..." : null,
   });
 
   await deleteState(orState);
 
   try {
-    // Exchange OpenRouter code for user API key
     const baseUrl = req.protocol + "://" + req.get("host");
     const callbackUrl = `${baseUrl}/oauth/openrouter-callback`;
 
-    log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Exchanging code for API key", {
+    log("INFO", "[AUTH_FLOW] Step: callback_exchange_openrouter_code", {
+      flow_phase: "auth_flow",
+      step: "callback_exchange_code",
       callback_url: callbackUrl,
       has_code_verifier: !!authData.codeVerifier,
     });
@@ -343,20 +369,22 @@ router.get("/openrouter-callback", async (req, res) => {
       callbackUrl
     );
 
-    log("INFO", "[OAUTH_OPENROUTER_CALLBACK] OpenRouter OAuth successful", {
+    log("INFO", "[AUTH_FLOW] Step: callback_openrouter_success", {
+      flow_phase: "auth_flow",
+      step: "callback_openrouter_done",
       user_id: userId,
       has_api_key: !!apiKey,
     });
 
-    // Generate authorization code for our OAuth flow
     const authCode = generateSessionToken();
-    
-    log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Generating authorization code", {
-      auth_code: authCode.substring(0, 10) + "...",
+
+    log("INFO", "[AUTH_FLOW] Step: callback_issue_auth_code", {
+      flow_phase: "auth_flow",
+      step: "callback_issue_code",
+      auth_code_preview: authCode.substring(0, 10) + "...",
       client_id: authData.clientId,
     });
-    
-    // Store authorization code with user's API key (Redis when REDIS_URL set)
+
     await storeAuthorizationCode(
       authCode,
       userId,
@@ -368,19 +396,22 @@ router.get("/openrouter-callback", async (req, res) => {
       authData.scopes
     );
 
-    // Redirect back to client with authorization code
     const redirectUri = `${authData.redirectUri}?code=${authCode}&state=${authData.state || ""}`;
-    log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Redirecting to client", {
-      redirect_uri: redirectUri.substring(0, 100) + "...",
+    log("INFO", "[AUTH_FLOW] Step: callback_redirect_to_client", {
+      flow_phase: "auth_flow",
+      step: "callback_redirect",
+      redirect_uri_preview: redirectUri.substring(0, 80) + "...",
       has_code: true,
       has_state: !!authData.state,
     });
-    
+
     res.redirect(redirectUri);
 
   } catch (error) {
     logError("OAUTH_OPENROUTER_CALLBACK", error, {
-      state: orState,
+      flow_phase: "auth_flow",
+      step: "callback_error",
+      state_preview: orState ? orState.substring(0, 12) + "..." : null,
       has_auth_data: !!authData,
     });
     const errorUri = `${authData.redirectUri}?error=server_error&error_description=${encodeURIComponent(error.message)}&state=${authData.state || ""}`;
@@ -417,17 +448,19 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
     refresh_token,
   } = req.body;
 
-  log("INFO", "[OAUTH_TOKEN] Processing token request", {
+  log("INFO", "[AUTH_FLOW] Step: token_request", {
+    flow_phase: "auth_flow",
+    step: "token_request",
     grant_type,
     has_code: !!code,
+    code_preview: code ? code.substring(0, 10) + "..." : null,
     has_refresh_token: !!refresh_token,
     has_code_verifier: !!code_verifier,
     has_client_id: !!client_id,
-    redirect_uri,
+    redirect_uri: redirect_uri ? redirect_uri.substring(0, 50) + "..." : null,
   });
 
   try {
-    // Handle authorization code grant
     if (grant_type === "authorization_code") {
       if (!code || !redirect_uri || !code_verifier) {
         log("WARN", "[OAUTH_TOKEN] Missing required parameters for authorization_code grant", {
@@ -453,15 +486,19 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
         }
       }
 
-      log("INFO", "[OAUTH_TOKEN] Consuming authorization code", {
-        code: code.substring(0, 10) + "...",
-        has_code_verifier: !!code_verifier,
+      log("INFO", "[AUTH_FLOW] Step: token_consume_code", {
+        flow_phase: "auth_flow",
+        step: "token_consume_code",
+        code_preview: code.substring(0, 10) + "...",
       });
 
       const codeData = await consumeAuthorizationCode(code, code_verifier);
       if (!codeData) {
-        log("WARN", "[OAUTH_TOKEN] Invalid or expired authorization code", {
-          code: code.substring(0, 10) + "...",
+        log("WARN", "[AUTH_FLOW] Step: token_code_invalid", {
+          flow_phase: "auth_flow",
+          step: "token_code_consume_failed",
+          code_preview: code.substring(0, 10) + "...",
+          reason: "invalid_or_expired_or_pkce_failed",
         });
         return res.status(400).json({
           error: "invalid_grant",
@@ -469,10 +506,11 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
         });
       }
 
-      log("INFO", "[OAUTH_TOKEN] Authorization code validated", {
+      log("INFO", "[AUTH_FLOW] Step: token_code_validated", {
+        flow_phase: "auth_flow",
+        step: "token_code_ok",
         user_id: codeData.userId,
         client_id: codeData.clientId,
-        redirect_uri: codeData.redirectUri,
       });
 
       if (codeData.redirectUri !== redirect_uri) {
@@ -486,10 +524,11 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
         });
       }
 
-      log("INFO", "[OAUTH_TOKEN] Generating tokens", {
+      log("INFO", "[AUTH_FLOW] Step: token_issue_tokens", {
+        flow_phase: "auth_flow",
+        step: "token_generate",
         user_id: codeData.userId,
         client_id: codeData.clientId,
-        scopes: codeData.scopes,
       });
 
       const accessToken = generateAccessToken(
@@ -508,10 +547,12 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
         codeData.scopes
       );
 
-      log("INFO", "[OAUTH_TOKEN] Tokens issued successfully", {
+      log("INFO", "[AUTH_FLOW] Step: token_issued_success", {
+        flow_phase: "auth_flow",
+        step: "token_issued",
         user_id: codeData.userId,
         client_id: codeData.clientId,
-        access_token_preview: accessToken.substring(0, 20) + "...",
+        access_token_preview: accessToken.substring(0, 16) + "...",
       });
 
       return res.json({
@@ -538,7 +579,11 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
 
       const refreshData = await getRefreshToken(refresh_token);
       if (!refreshData) {
-        log("WARN", "[OAUTH_TOKEN] Invalid or expired refresh token");
+        log("WARN", "[AUTH_FLOW] Step: token_refresh_invalid", {
+          flow_phase: "auth_flow",
+          step: "token_refresh_lookup_failed",
+          refresh_token_preview: refresh_token ? refresh_token.substring(0, 10) + "..." : null,
+        });
         return res.status(400).json({
           error: "invalid_grant",
           error_description: "Invalid or expired refresh token",
@@ -552,6 +597,11 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
 
       const oldTokenData = await getAccessToken(refreshData.accessToken);
       if (!oldTokenData) {
+        log("WARN", "[AUTH_FLOW] Step: token_refresh_old_token_missing", {
+          flow_phase: "auth_flow",
+          step: "token_refresh_access_token_not_found",
+          user_id: refreshData.userId,
+        });
         return res.status(400).json({
           error: "invalid_grant",
           error_description: "Associated access token not found",
@@ -590,7 +640,11 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
       error_description: `Grant type '${grant_type}' is not supported`,
     });
   } catch (err) {
-    logError("OAUTH_TOKEN", err);
+    logError("OAUTH_TOKEN", err, {
+      flow_phase: "auth_flow",
+      step: "token_error",
+      grant_type: req.body?.grant_type,
+    });
     return res.status(500).json({
       error: "server_error",
       error_description: "Token request failed",
@@ -604,6 +658,12 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
  */
 router.post("/introspect", express.urlencoded({ extended: true }), express.json(), async (req, res) => {
   const { token, token_type_hint } = req.body;
+
+  log("INFO", "[AUTH_FLOW] Step: introspect_request", {
+    flow_phase: "auth_flow",
+    step: "introspect",
+    has_token: !!token,
+  });
 
   if (!token) {
     return res.status(400).json({
@@ -649,6 +709,12 @@ router.post("/introspect", express.urlencoded({ extended: true }), express.json(
  */
 const { verifyBearerToken } = require("../middleware/auth");
 router.get("/status", verifyBearerToken, (req, res) => {
+  log("INFO", "[AUTH_FLOW] Step: status_ok", {
+    flow_phase: "auth_flow",
+    step: "oauth_status",
+    user_id: req.user.userId,
+    client_id: req.user.clientId,
+  });
   res.json({
     authenticated: true,
     user_id: req.user.userId,

@@ -55,7 +55,13 @@ async function redisStoreAccessToken(accessToken, refreshToken, apiKey, userId, 
     );
   }
   await redis.sAdd(KEY_USER_TOKENS + userId, accessToken);
-  log("INFO", "[TOKEN_STORAGE] Access token stored (Redis)", { user_id: userId, client_id: clientId });
+  log("INFO", "[AUTH_FLOW] Token storage: access token stored (Redis)", {
+    flow_phase: "token_storage",
+    operation: "store_access_token",
+    backend: "redis",
+    user_id: userId,
+    client_id: clientId,
+  });
 }
 
 async function redisStoreAuthorizationCode(code, userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresIn) {
@@ -64,31 +70,81 @@ async function redisStoreAuthorizationCode(code, userId, apiKey, clientId, redir
   const expiresAt = Date.now() + expiresIn * 1000;
   const data = { userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt, createdAt: Date.now() };
   await redis.set(KEY_CODE + code, JSON.stringify(data), { EX: expiresIn });
-  log("INFO", "[TOKEN_STORAGE] Authorization code stored (Redis)", { code: code.substring(0, 10) + "...", user_id: userId });
+  log("INFO", "[AUTH_FLOW] Token storage: authorization code stored (Redis)", {
+    flow_phase: "token_storage",
+    operation: "store_authorization_code",
+    backend: "redis",
+    code_preview: code.substring(0, 10) + "...",
+    user_id: userId,
+  });
 }
 
 async function redisConsumeAuthorizationCode(code, codeVerifier) {
   const redis = await getRedisClient();
-  if (!redis) return null;
+  if (!redis) {
+    log("WARN", "[AUTH_FLOW] Token storage: consume code failed (no Redis)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      backend: "redis",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "redis_unavailable",
+    });
+    return null;
+  }
   const raw = await redis.get(KEY_CODE + code);
-  if (!raw) return null;
+  if (!raw) {
+    log("WARN", "[AUTH_FLOW] Token storage: authorization code not found (Redis)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      backend: "redis",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "code_not_found_or_expired",
+    });
+    return null;
+  }
   let codeData;
   try {
     codeData = JSON.parse(raw);
   } catch {
+    log("WARN", "[AUTH_FLOW] Token storage: code parse failed (Redis)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "invalid_json",
+    });
     return null;
   }
   if (Date.now() > codeData.expiresAt) {
     await redis.del(KEY_CODE + code);
+    log("WARN", "[AUTH_FLOW] Token storage: authorization code expired (Redis)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "expired",
+    });
     return null;
   }
   if (codeData.codeChallengeMethod === "S256") {
     const crypto = require("crypto");
     const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
-    if (computed !== codeData.codeChallenge) return null;
+    if (computed !== codeData.codeChallenge) {
+      log("WARN", "[AUTH_FLOW] Token storage: PKCE verification failed (Redis)", {
+        flow_phase: "token_storage",
+        operation: "consume_code",
+        code_preview: code.substring(0, 10) + "...",
+        reason: "pkce_mismatch",
+      });
+      return null;
+    }
   }
   await redis.del(KEY_CODE + code);
-  log("INFO", "[TOKEN_STORAGE] Authorization code consumed (Redis)", { code: code.substring(0, 10) + "..." });
+  log("INFO", "[AUTH_FLOW] Token storage: authorization code consumed (Redis)", {
+    flow_phase: "token_storage",
+    operation: "consume_code",
+    backend: "redis",
+    code_preview: code.substring(0, 10) + "...",
+    user_id: codeData.userId,
+  });
   return codeData;
 }
 
@@ -97,9 +153,25 @@ async function redisGetAccessToken(token) {
   if (!redis) return null;
   const raw = await redis.get(KEY_TOKEN + token);
   const tokenData = deserializeTokenData(raw);
-  if (!tokenData) return null;
+  if (!tokenData) {
+    log("INFO", "[AUTH_FLOW] Token storage: access token not found (Redis)", {
+      flow_phase: "token_storage",
+      operation: "get_access_token",
+      backend: "redis",
+      token_preview: token ? token.substring(0, 16) + "..." : null,
+      reason: "not_found",
+    });
+    return null;
+  }
   if (tokenData.expiresAt && new Date() > tokenData.expiresAt) {
     await redisDeleteToken(token);
+    log("INFO", "[AUTH_FLOW] Token storage: access token expired (Redis)", {
+      flow_phase: "token_storage",
+      operation: "get_access_token",
+      backend: "redis",
+      user_id: tokenData.userId,
+      reason: "expired",
+    });
     return null;
   }
   return tokenData;
@@ -151,7 +223,13 @@ function storeAccessToken(accessToken, refreshToken, apiKey, userId, clientId, s
   }
   if (!userTokenMap.has(userId)) userTokenMap.set(userId, new Set());
   userTokenMap.get(userId).add(accessToken);
-  log("INFO", "[TOKEN_STORAGE] Access token stored", { user_id: userId, client_id: clientId });
+  log("INFO", "[AUTH_FLOW] Token storage: access token stored (memory)", {
+    flow_phase: "token_storage",
+    operation: "store_access_token",
+    backend: "memory",
+    user_id: userId,
+    client_id: clientId,
+  });
   return Promise.resolve();
 }
 
@@ -163,7 +241,13 @@ function storeAuthorizationCode(code, userId, apiKey, clientId, redirectUri, cod
   authorizationCodes.set(code, {
     userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt, createdAt: Date.now(),
   });
-  log("INFO", "[TOKEN_STORAGE] Authorization code stored", { code: code.substring(0, 10) + "...", user_id: userId });
+  log("INFO", "[AUTH_FLOW] Token storage: authorization code stored (memory)", {
+    flow_phase: "token_storage",
+    operation: "store_authorization_code",
+    backend: "memory",
+    code_preview: code.substring(0, 10) + "...",
+    user_id: userId,
+  });
   setTimeout(() => {
     authorizationCodes.delete(code);
     log("INFO", "[TOKEN_STORAGE] Authorization code expired and cleaned up", { code: code.substring(0, 10) + "..." });
@@ -176,18 +260,48 @@ function consumeAuthorizationCode(code, codeVerifier) {
     return redisConsumeAuthorizationCode(code, codeVerifier);
   }
   const codeData = authorizationCodes.get(code);
-  if (!codeData) return Promise.resolve(null);
+  if (!codeData) {
+    log("WARN", "[AUTH_FLOW] Token storage: authorization code not found (memory)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      backend: "memory",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "code_not_found",
+    });
+    return Promise.resolve(null);
+  }
   if (Date.now() > codeData.expiresAt) {
     authorizationCodes.delete(code);
+    log("WARN", "[AUTH_FLOW] Token storage: authorization code expired (memory)", {
+      flow_phase: "token_storage",
+      operation: "consume_code",
+      backend: "memory",
+      code_preview: code.substring(0, 10) + "...",
+      reason: "expired",
+    });
     return Promise.resolve(null);
   }
   if (codeData.codeChallengeMethod === "S256") {
     const crypto = require("crypto");
     const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
-    if (computed !== codeData.codeChallenge) return Promise.resolve(null);
+    if (computed !== codeData.codeChallenge) {
+      log("WARN", "[AUTH_FLOW] Token storage: PKCE verification failed (memory)", {
+        flow_phase: "token_storage",
+        operation: "consume_code",
+        code_preview: code.substring(0, 10) + "...",
+        reason: "pkce_mismatch",
+      });
+      return Promise.resolve(null);
+    }
   }
   authorizationCodes.delete(code);
-  log("INFO", "[TOKEN_STORAGE] Authorization code consumed", { code: code.substring(0, 10) + "..." });
+  log("INFO", "[AUTH_FLOW] Token storage: authorization code consumed (memory)", {
+    flow_phase: "token_storage",
+    operation: "consume_code",
+    backend: "memory",
+    code_preview: code.substring(0, 10) + "...",
+    user_id: codeData.userId,
+  });
   return Promise.resolve(codeData);
 }
 
