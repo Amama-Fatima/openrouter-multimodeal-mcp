@@ -200,6 +200,9 @@ The following environment variables are required/optional:
 - `OPENROUTER_DEFAULT_MODEL`: Optional - Default model to use (defaults to `qwen/qwen2.5-vl-32b-instruct:free`)
 - `OAUTH_TOKEN_EXPIRATION`: Optional - Token expiration time in milliseconds (null = no expiration)
 - `PORT`: Optional - Server port (defaults to 10000)
+- `REDIS_URL`: **Recommended for production / multiple replicas** - Redis connection URL (e.g. `redis://default:password@host:6379`). When set, OAuth state and tokens are stored in Redis so that:
+  - The OpenRouter callback works even when the callback request hits a different replica than the one that started the flow (fixes "Invalid or expired state").
+  - Token exchange and MCP requests work on any replica. Without Redis, use a single replica or sticky sessions.
 
 **Note:** `OPENROUTER_API_KEY` is **NOT used**. OAuth authentication is **REQUIRED** for all users. Each user authenticates individually and receives their own API key.
 
@@ -212,6 +215,11 @@ Tokens are currently stored in-memory. For production deployments, consider:
 - **JWT**: For stateless token validation
 
 ## Troubleshooting
+
+### "Invalid or expired state" on OpenRouter callback
+- This happens when the server uses **multiple replicas** or the container restarts between starting the flow and the callback. OAuth state was stored in memory on one instance, but the callback hit another instance that has no state.
+- **Fix:** Set `REDIS_URL` (e.g. add a Redis plugin on Railway and use its `REDIS_URL`). OAuth state and tokens are then stored in Redis and work across all replicas.
+- If you must run without Redis, use a single replica or enable sticky sessions so the same replica handles the full OAuth flow.
 
 ### "Authentication required" error
 - Ensure you've completed the OAuth flow and received a Bearer token
@@ -226,6 +234,7 @@ Tokens are currently stored in-memory. For production deployments, consider:
 - Ensure your server is accessible from the internet (for OpenRouter callback)
 - Check that the callback URL matches what's registered
 - Verify PKCE code verifier is being stored correctly
+- With multiple replicas, set `REDIS_URL` (see "Invalid or expired state" above)
 
 ## OAuth-Only Mode
 

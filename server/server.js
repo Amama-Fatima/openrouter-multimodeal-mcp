@@ -199,6 +199,12 @@ app.listen(config.server.port, () => {
   console.log("\n⚠️  IMPORTANT: OAuth authentication is REQUIRED");
   console.log("   No shared API key is used - each user authenticates individually");
   console.log("   Users must complete OAuth flow before accessing MCP endpoints");
+
+  if (process.env.REDIS_URL) {
+    console.log("\n✓ Redis enabled (REDIS_URL): OAuth state and tokens shared across replicas");
+  } else {
+    console.log("\n  Tip: For multiple replicas (e.g. Railway), set REDIS_URL so OAuth state and tokens work across instances");
+  }
 });
 
 process.on("SIGTERM", () => {

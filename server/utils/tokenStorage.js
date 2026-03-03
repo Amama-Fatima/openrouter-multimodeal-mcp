@@ -1,257 +1,273 @@
 // utils/tokenStorage.js
-// In-memory token storage (can be replaced with Redis/database in production)
+// In-memory token storage, or Redis when REDIS_URL is set (for multi-replica deployments)
 
-const tokenStore = new Map(); // access_token -> { apiKey, userId, clientId, scopes, expiresAt, createdAt, refreshToken }
-const refreshTokenStore = new Map(); // refresh_token -> { userId, clientId, scopes, accessToken, createdAt }
-const userTokenMap = new Map(); // userId -> Set of tokens
-const authorizationCodes = new Map(); // code -> { userId, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt }
+const { getRedisClient, isRedisEnabled } = require("./redisClient");
 
-// Enhanced logging
+const CODE_TTL_SEC = 600;
+const ACCESS_TOKEN_TTL_SEC = 3600;
+const REFRESH_TOKEN_TTL_SEC = 86400 * 30;
+const KEY_CODE = "oauth:code:";
+const KEY_TOKEN = "oauth:token:";
+const KEY_REFRESH = "oauth:refresh:";
+const KEY_USER_TOKENS = "oauth:user_tokens:";
+
+const tokenStore = new Map();
+const refreshTokenStore = new Map();
+const userTokenMap = new Map();
+const authorizationCodes = new Map();
+
 function log(level, message, data = {}) {
   const timestamp = new Date().toISOString();
   console.log(JSON.stringify({ timestamp, level, message, ...data }));
 }
 
-/**
- * Store an access token with associated user API key
- * @param {string} accessToken - Access token (JWT)
- * @param {string} refreshToken - Refresh token
- * @param {string} apiKey - User's OpenRouter API key
- * @param {string} userId - User ID from OpenRouter
- * @param {string} clientId - OAuth client ID
- * @param {string[]} scopes - Token scopes
- * @param {Date} expiresAt - Optional expiration date
- */
-function storeAccessToken(accessToken, refreshToken, apiKey, userId, clientId, scopes = [], expiresAt = null) {
+function serializeTokenData(data) {
+  const o = { ...data };
+  if (o.expiresAt) o.expiresAt = o.expiresAt instanceof Date ? o.expiresAt.toISOString() : o.expiresAt;
+  if (o.createdAt) o.createdAt = o.createdAt instanceof Date ? o.createdAt.toISOString() : o.createdAt;
+  return JSON.stringify(o);
+}
+
+function deserializeTokenData(json) {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json);
+    if (o.expiresAt) o.expiresAt = new Date(o.expiresAt);
+    if (o.createdAt) o.createdAt = new Date(o.createdAt);
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- Redis implementations ----------
+async function redisStoreAccessToken(accessToken, refreshToken, apiKey, userId, clientId, scopes, expiresAt) {
+  const redis = await getRedisClient();
+  if (!redis) return;
   const now = new Date();
-  tokenStore.set(accessToken, {
-    apiKey,
-    userId,
-    clientId,
-    scopes,
-    refreshToken,
-    expiresAt,
-    createdAt: now,
-  });
-
-  // Store refresh token mapping
+  const data = { apiKey, userId, clientId, scopes, refreshToken, expiresAt, createdAt: now };
+  await redis.set(KEY_TOKEN + accessToken, serializeTokenData(data), { EX: ACCESS_TOKEN_TTL_SEC });
   if (refreshToken) {
-    refreshTokenStore.set(refreshToken, {
-      userId,
-      clientId,
-      scopes,
-      accessToken,
-      createdAt: now,
-    });
+    await redis.set(
+      KEY_REFRESH + refreshToken,
+      JSON.stringify({ userId, clientId, scopes, accessToken, createdAt: now }),
+      { EX: REFRESH_TOKEN_TTL_SEC }
+    );
   }
-
-  // Track tokens per user
-  if (!userTokenMap.has(userId)) {
-    userTokenMap.set(userId, new Set());
-  }
-  userTokenMap.get(userId).add(accessToken);
-
-  log("INFO", "[TOKEN_STORAGE] Access token stored", {
-    user_id: userId,
-    client_id: clientId,
-    scopes,
-    has_refresh_token: !!refreshToken,
-  });
+  await redis.sAdd(KEY_USER_TOKENS + userId, accessToken);
+  log("INFO", "[TOKEN_STORAGE] Access token stored (Redis)", { user_id: userId, client_id: clientId });
 }
 
-/**
- * Store authorization code (for OAuth flow)
- * @param {string} code - Authorization code
- * @param {string} userId - User ID
- * @param {string} apiKey - User's OpenRouter API key
- * @param {string} clientId - Client ID
- * @param {string} redirectUri - Redirect URI
- * @param {string} codeChallenge - PKCE code challenge
- * @param {string} codeChallengeMethod - PKCE method (S256)
- * @param {string[]} scopes - Requested scopes
- * @param {number} expiresIn - Expiration in seconds (default: 10 minutes)
- */
-function storeAuthorizationCode(code, userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresIn = 600) {
+async function redisStoreAuthorizationCode(code, userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresIn) {
+  const redis = await getRedisClient();
+  if (!redis) return;
   const expiresAt = Date.now() + expiresIn * 1000;
-  authorizationCodes.set(code, {
-    userId,
-    apiKey, // Store API key with authorization code
-    clientId,
-    redirectUri,
-    codeChallenge,
-    codeChallengeMethod,
-    scopes,
-    expiresAt,
-    createdAt: Date.now(),
-  });
-  
-  log("INFO", "[TOKEN_STORAGE] Authorization code stored", {
-    code: code.substring(0, 10) + "...",
-    user_id: userId,
-    client_id: clientId,
-    expires_in: expiresIn,
-  });
-  
-  // Clean up expired codes periodically
-  setTimeout(() => {
-    authorizationCodes.delete(code);
-    log("INFO", "[TOKEN_STORAGE] Authorization code expired and cleaned up", {
-      code: code.substring(0, 10) + "...",
-    });
-  }, expiresIn * 1000);
+  const data = { userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt, createdAt: Date.now() };
+  await redis.set(KEY_CODE + code, JSON.stringify(data), { EX: expiresIn });
+  log("INFO", "[TOKEN_STORAGE] Authorization code stored (Redis)", { code: code.substring(0, 10) + "...", user_id: userId });
 }
 
-/**
- * Get and consume authorization code
- * @param {string} code - Authorization code
- * @param {string} codeVerifier - PKCE code verifier
- * @returns {Object|null} Code data or null if invalid
- */
-function consumeAuthorizationCode(code, codeVerifier) {
-  const codeData = authorizationCodes.get(code);
-  if (!codeData) {
+async function redisConsumeAuthorizationCode(code, codeVerifier) {
+  const redis = await getRedisClient();
+  if (!redis) return null;
+  const raw = await redis.get(KEY_CODE + code);
+  if (!raw) return null;
+  let codeData;
+  try {
+    codeData = JSON.parse(raw);
+  } catch {
     return null;
   }
-
-  // Check expiration
   if (Date.now() > codeData.expiresAt) {
-    authorizationCodes.delete(code);
+    await redis.del(KEY_CODE + code);
     return null;
   }
-
-  // Verify PKCE
   if (codeData.codeChallengeMethod === "S256") {
     const crypto = require("crypto");
-    const computedChallenge = crypto
-      .createHash("sha256")
-      .update(codeVerifier)
-      .digest("base64url");
-    
-    if (computedChallenge !== codeData.codeChallenge) {
-      console.log("PKCE verification failed");
-      return null;
-    }
+    const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    if (computed !== codeData.codeChallenge) return null;
   }
-
-  // Consume code (delete it)
-  authorizationCodes.delete(code);
-
-  log("INFO", "[TOKEN_STORAGE] Authorization code consumed", {
-    code: code.substring(0, 10) + "...",
-    user_id: codeData.userId,
-    client_id: codeData.clientId,
-  });
-
+  await redis.del(KEY_CODE + code);
+  log("INFO", "[TOKEN_STORAGE] Authorization code consumed (Redis)", { code: code.substring(0, 10) + "..." });
   return codeData;
 }
 
-/**
- * Retrieve access token data
- * @param {string} token - Access token (JWT or opaque)
- * @returns {Object|null} { apiKey, userId, clientId, scopes, expiresAt, createdAt } or null
- */
-function getAccessToken(token) {
-  const tokenData = tokenStore.get(token);
-  if (!tokenData) {
-    return null;
-  }
-
-  // Check expiration
+async function redisGetAccessToken(token) {
+  const redis = await getRedisClient();
+  if (!redis) return null;
+  const raw = await redis.get(KEY_TOKEN + token);
+  const tokenData = deserializeTokenData(raw);
+  if (!tokenData) return null;
   if (tokenData.expiresAt && new Date() > tokenData.expiresAt) {
-    console.log(`Token expired for user ${tokenData.userId}`);
-    deleteToken(token);
+    await redisDeleteToken(token);
     return null;
   }
-
   return tokenData;
 }
 
-/**
- * Get refresh token data
- * @param {string} refreshToken - Refresh token
- * @returns {Object|null} Refresh token data or null
- */
-function getRefreshToken(refreshToken) {
-  return refreshTokenStore.get(refreshToken) || null;
-}
-
-/**
- * Revoke refresh token and associated access token
- * @param {string} refreshToken - Refresh token
- */
-function revokeRefreshToken(refreshToken) {
-  const refreshData = refreshTokenStore.get(refreshToken);
-  if (refreshData) {
-    // Delete associated access token
-    deleteToken(refreshData.accessToken);
-    refreshTokenStore.delete(refreshToken);
+async function redisGetRefreshToken(refreshToken) {
+  const redis = await getRedisClient();
+  if (!redis) return null;
+  const raw = await redis.get(KEY_REFRESH + refreshToken);
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    if (o.createdAt) o.createdAt = new Date(o.createdAt);
+    return o;
+  } catch {
+    return null;
   }
 }
 
-/**
- * Delete a token
- * @param {string} token - Bearer token
- */
+async function redisRevokeRefreshToken(refreshToken) {
+  const refreshData = await redisGetRefreshToken(refreshToken);
+  if (refreshData) {
+    await redisDeleteToken(refreshData.accessToken);
+    const redis = await getRedisClient();
+    if (redis) await redis.del(KEY_REFRESH + refreshToken);
+  }
+}
+
+async function redisDeleteToken(token) {
+  const redis = await getRedisClient();
+  if (!redis) return;
+  const raw = await redis.get(KEY_TOKEN + token);
+  const tokenData = deserializeTokenData(raw);
+  if (tokenData) {
+    await redis.del(KEY_TOKEN + token);
+    await redis.sRem(KEY_USER_TOKENS + tokenData.userId, token);
+  }
+}
+
+// ---------- Public API (always return Promises when Redis enabled) ----------
+function storeAccessToken(accessToken, refreshToken, apiKey, userId, clientId, scopes = [], expiresAt = null) {
+  const now = new Date();
+  if (isRedisEnabled()) {
+    return redisStoreAccessToken(accessToken, refreshToken, apiKey, userId, clientId, scopes, expiresAt);
+  }
+  tokenStore.set(accessToken, { apiKey, userId, clientId, scopes, refreshToken, expiresAt, createdAt: now });
+  if (refreshToken) {
+    refreshTokenStore.set(refreshToken, { userId, clientId, scopes, accessToken, createdAt: now });
+  }
+  if (!userTokenMap.has(userId)) userTokenMap.set(userId, new Set());
+  userTokenMap.get(userId).add(accessToken);
+  log("INFO", "[TOKEN_STORAGE] Access token stored", { user_id: userId, client_id: clientId });
+  return Promise.resolve();
+}
+
+function storeAuthorizationCode(code, userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresIn = 600) {
+  if (isRedisEnabled()) {
+    return redisStoreAuthorizationCode(code, userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresIn);
+  }
+  const expiresAt = Date.now() + expiresIn * 1000;
+  authorizationCodes.set(code, {
+    userId, apiKey, clientId, redirectUri, codeChallenge, codeChallengeMethod, scopes, expiresAt, createdAt: Date.now(),
+  });
+  log("INFO", "[TOKEN_STORAGE] Authorization code stored", { code: code.substring(0, 10) + "...", user_id: userId });
+  setTimeout(() => {
+    authorizationCodes.delete(code);
+    log("INFO", "[TOKEN_STORAGE] Authorization code expired and cleaned up", { code: code.substring(0, 10) + "..." });
+  }, expiresIn * 1000);
+  return Promise.resolve();
+}
+
+function consumeAuthorizationCode(code, codeVerifier) {
+  if (isRedisEnabled()) {
+    return redisConsumeAuthorizationCode(code, codeVerifier);
+  }
+  const codeData = authorizationCodes.get(code);
+  if (!codeData) return Promise.resolve(null);
+  if (Date.now() > codeData.expiresAt) {
+    authorizationCodes.delete(code);
+    return Promise.resolve(null);
+  }
+  if (codeData.codeChallengeMethod === "S256") {
+    const crypto = require("crypto");
+    const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    if (computed !== codeData.codeChallenge) return Promise.resolve(null);
+  }
+  authorizationCodes.delete(code);
+  log("INFO", "[TOKEN_STORAGE] Authorization code consumed", { code: code.substring(0, 10) + "..." });
+  return Promise.resolve(codeData);
+}
+
+function getAccessToken(token) {
+  if (isRedisEnabled()) {
+    return redisGetAccessToken(token);
+  }
+  const tokenData = tokenStore.get(token);
+  if (!tokenData) return Promise.resolve(null);
+  if (tokenData.expiresAt && new Date() > tokenData.expiresAt) {
+    deleteToken(token);
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(tokenData);
+}
+
+function getRefreshToken(refreshToken) {
+  if (isRedisEnabled()) {
+    return redisGetRefreshToken(refreshToken);
+  }
+  return Promise.resolve(refreshTokenStore.get(refreshToken) || null);
+}
+
+function revokeRefreshToken(refreshToken) {
+  if (isRedisEnabled()) {
+    return redisRevokeRefreshToken(refreshToken);
+  }
+  const refreshData = refreshTokenStore.get(refreshToken);
+  if (refreshData) {
+    deleteToken(refreshData.accessToken);
+    refreshTokenStore.delete(refreshToken);
+  }
+  return Promise.resolve();
+}
+
 function deleteToken(token) {
+  if (isRedisEnabled()) {
+    return redisDeleteToken(token);
+  }
   const tokenData = tokenStore.get(token);
   if (tokenData) {
     tokenStore.delete(token);
     const userTokens = userTokenMap.get(tokenData.userId);
     if (userTokens) {
       userTokens.delete(token);
-      if (userTokens.size === 0) {
-        userTokenMap.delete(tokenData.userId);
-      }
+      if (userTokens.size === 0) userTokenMap.delete(tokenData.userId);
     }
   }
+  return Promise.resolve();
 }
 
-/**
- * Delete all tokens for a user
- * @param {string} userId - User ID
- */
 function deleteUserTokens(userId) {
+  if (isRedisEnabled()) {
+    return Promise.resolve(); // Optional: implement Redis SREM all for user
+  }
   const tokens = userTokenMap.get(userId);
   if (tokens) {
-    tokens.forEach((token) => {
-      tokenStore.delete(token);
-    });
+    tokens.forEach((t) => tokenStore.delete(t));
     userTokenMap.delete(userId);
   }
+  return Promise.resolve();
 }
 
-/**
- * Clean up expired tokens
- */
 function cleanupExpiredTokens() {
+  if (isRedisEnabled()) return Promise.resolve();
   const now = new Date();
-  const expiredTokens = [];
-
+  const expired = [];
   tokenStore.forEach((data, token) => {
-    if (data.expiresAt && now > data.expiresAt) {
-      expiredTokens.push(token);
-    }
+    if (data.expiresAt && now > data.expiresAt) expired.push(token);
   });
-
-  expiredTokens.forEach((token) => deleteToken(token));
-
-  if (expiredTokens.length > 0) {
-    console.log(`Cleaned up ${expiredTokens.length} expired tokens`);
-  }
+  expired.forEach((t) => deleteToken(t));
+  if (expired.length > 0) console.log(`Cleaned up ${expired.length} expired tokens`);
+  return Promise.resolve();
 }
 
-// Run cleanup every 5 minutes
-setInterval(cleanupExpiredTokens, 5 * 60 * 1000);
+setInterval(() => cleanupExpiredTokens(), 5 * 60 * 1000);
 
-/**
- * Get statistics about stored tokens
- * @returns {Object} Statistics
- */
 function getStats() {
-  return {
-    totalTokens: tokenStore.size,
-    uniqueUsers: userTokenMap.size,
-  };
+  if (isRedisEnabled()) return Promise.resolve({ totalTokens: 0, uniqueUsers: 0 });
+  return Promise.resolve({ totalTokens: tokenStore.size, uniqueUsers: userTokenMap.size });
 }
 
 module.exports = {

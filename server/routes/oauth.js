@@ -56,20 +56,7 @@ const {
   verifyAccessToken,
 } = require("../utils/jwt");
 const { registerClient, getClient, verifyClient } = require("../utils/clientRegistry");
-
-// Store OpenRouter OAuth state temporarily
-const openRouterAuths = new Map(); // state -> { codeVerifier, userId, clientId, redirectUri, scopes, timestamp }
-
-// Clean up old OpenRouter auths (older than 10 minutes)
-setInterval(() => {
-  const now = Date.now();
-  const tenMinutes = 10 * 60 * 1000;
-  for (const [state, data] of openRouterAuths.entries()) {
-    if (now - data.timestamp > tenMinutes) {
-      openRouterAuths.delete(state);
-    }
-  }
-}, 5 * 60 * 1000);
+const { setState, getState, deleteState } = require("../utils/stateStore");
 
 /**
  * OPTIONS /oauth/register
@@ -146,9 +133,9 @@ router.options("/authorize", (req, res) => {
  * OAuth 2.1 Authorization Endpoint
  * Query params: client_id, redirect_uri, response_type, scope, code_challenge, code_challenge_method, state
  */
-router.get("/authorize", (req, res) => {
+router.get("/authorize", async (req, res) => {
   logRequest(req, "OAUTH_AUTHORIZE");
-  
+
   const {
     client_id,
     redirect_uri,
@@ -233,23 +220,29 @@ router.get("/authorize", (req, res) => {
 
   // Generate PKCE for OpenRouter OAuth
   const { codeVerifier, codeChallenge: orCodeChallenge } = generatePKCE();
-  
+
   // Generate state for OpenRouter OAuth
   const orState = generateSessionToken();
 
-  // Store OpenRouter OAuth state
-  // Note: code_challenge is the client's PKCE challenge (for our OAuth flow)
-  // orCodeChallenge is our PKCE challenge (for OpenRouter OAuth)
-  openRouterAuths.set(orState, {
+  // Store OpenRouter OAuth state (Redis when REDIS_URL set, so callback works on any replica)
+  const stateData = {
     codeVerifier,
     clientId: client_id,
     redirectUri: redirect_uri,
-    codeChallenge: code_challenge, // Client's PKCE challenge (from query params)
+    codeChallenge: code_challenge,
     codeChallengeMethod: code_challenge_method || "S256",
     scopes,
-    state, // Original state from client
-    timestamp: Date.now(),
-  });
+    state,
+  };
+  try {
+    await setState(orState, stateData);
+  } catch (err) {
+    logError("OAUTH_AUTHORIZE", err, { orState: orState.substring(0, 10) + "..." });
+    return res.status(503).json({
+      error: "server_error",
+      error_description: "Failed to store OAuth state",
+    });
+  }
 
   // Build OpenRouter authorization URL
   const baseUrl = req.protocol + "://" + req.get("host");
@@ -263,7 +256,6 @@ router.get("/authorize", (req, res) => {
     openrouter_auth_url: openRouterAuthUrlWithState.substring(0, 100) + "...",
   });
 
-  // Redirect to OpenRouter for user authentication
   res.redirect(openRouterAuthUrlWithState);
 });
 
@@ -288,8 +280,9 @@ router.get("/openrouter-callback", async (req, res) => {
       error,
       state: orState,
     });
-    const authData = openRouterAuths.get(orState);
+    const authData = await getState(orState);
     if (authData) {
+      await deleteState(orState);
       log("INFO", "[OAUTH_OPENROUTER_CALLBACK] Redirecting to client with error", {
         redirect_uri: authData.redirectUri,
         error,
@@ -314,16 +307,16 @@ router.get("/openrouter-callback", async (req, res) => {
     });
   }
 
-  // Retrieve OpenRouter auth data
-  const authData = openRouterAuths.get(orState);
+  // Retrieve OpenRouter auth data (from Redis when REDIS_URL set, so any replica can find it)
+  const authData = await getState(orState);
   if (!authData) {
     log("WARN", "[OAUTH_OPENROUTER_CALLBACK] Invalid or expired state", {
       state: orState,
-      available_states: Array.from(openRouterAuths.keys()),
+      hint: process.env.REDIS_URL ? "Check Redis connectivity" : "With multiple replicas, set REDIS_URL for shared state",
     });
     return res.status(400).json({
       error: "invalid_request",
-      error_description: "Invalid or expired state",
+      error_description: "Invalid or expired state. If using multiple server replicas, configure REDIS_URL for shared OAuth state.",
     });
   }
 
@@ -332,8 +325,7 @@ router.get("/openrouter-callback", async (req, res) => {
     redirect_uri: authData.redirectUri,
   });
 
-  // Clean up
-  openRouterAuths.delete(orState);
+  await deleteState(orState);
 
   try {
     // Exchange OpenRouter code for user API key
@@ -364,11 +356,11 @@ router.get("/openrouter-callback", async (req, res) => {
       client_id: authData.clientId,
     });
     
-    // Store authorization code with user's API key
-    storeAuthorizationCode(
+    // Store authorization code with user's API key (Redis when REDIS_URL set)
+    await storeAuthorizationCode(
       authCode,
       userId,
-      apiKey, // Store API key with authorization code
+      apiKey,
       authData.clientId,
       authData.redirectUri,
       authData.codeChallenge,
@@ -412,9 +404,9 @@ router.options("/token", (req, res) => {
  * OAuth 2.1 Token Endpoint
  * Exchanges authorization code for access/refresh tokens
  */
-router.post("/token", express.urlencoded({ extended: true }), express.json(), (req, res) => {
+router.post("/token", express.urlencoded({ extended: true }), express.json(), async (req, res) => {
   logRequest(req, "OAUTH_TOKEN");
-  
+
   const {
     grant_type,
     code,
@@ -434,190 +426,183 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), (r
     redirect_uri,
   });
 
-  // Handle authorization code grant
-  if (grant_type === "authorization_code") {
-    if (!code || !redirect_uri || !code_verifier) {
-      log("WARN", "[OAUTH_TOKEN] Missing required parameters for authorization_code grant", {
-        has_code: !!code,
-        has_redirect_uri: !!redirect_uri,
-        has_code_verifier: !!code_verifier,
-      });
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "Missing required parameters",
-      });
-    }
-
-    // Verify client (if client_secret provided)
-    if (client_id && client_secret) {
-      const isValid = verifyClient(client_id, client_secret);
-      log("INFO", "[OAUTH_TOKEN] Client verification", {
-        client_id,
-        is_valid: isValid,
-      });
-      if (!isValid) {
-        log("WARN", "[OAUTH_TOKEN] Invalid client credentials", { client_id });
-        return res.status(401).json({
-          error: "invalid_client",
-          error_description: "Invalid client credentials",
+  try {
+    // Handle authorization code grant
+    if (grant_type === "authorization_code") {
+      if (!code || !redirect_uri || !code_verifier) {
+        log("WARN", "[OAUTH_TOKEN] Missing required parameters for authorization_code grant", {
+          has_code: !!code,
+          has_redirect_uri: !!redirect_uri,
+          has_code_verifier: !!code_verifier,
+        });
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "Missing required parameters",
         });
       }
-    }
 
-    // Consume authorization code
-    log("INFO", "[OAUTH_TOKEN] Consuming authorization code", {
-      code: code.substring(0, 10) + "...",
-      has_code_verifier: !!code_verifier,
-    });
-    
-    const codeData = consumeAuthorizationCode(code, code_verifier);
-    if (!codeData) {
-      log("WARN", "[OAUTH_TOKEN] Invalid or expired authorization code", {
+      if (client_id && client_secret) {
+        const isValid = verifyClient(client_id, client_secret);
+        log("INFO", "[OAUTH_TOKEN] Client verification", { client_id, is_valid: isValid });
+        if (!isValid) {
+          log("WARN", "[OAUTH_TOKEN] Invalid client credentials", { client_id });
+          return res.status(401).json({
+            error: "invalid_client",
+            error_description: "Invalid client credentials",
+          });
+        }
+      }
+
+      log("INFO", "[OAUTH_TOKEN] Consuming authorization code", {
         code: code.substring(0, 10) + "...",
+        has_code_verifier: !!code_verifier,
       });
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Invalid or expired authorization code",
+
+      const codeData = await consumeAuthorizationCode(code, code_verifier);
+      if (!codeData) {
+        log("WARN", "[OAUTH_TOKEN] Invalid or expired authorization code", {
+          code: code.substring(0, 10) + "...",
+        });
+        return res.status(400).json({
+          error: "invalid_grant",
+          error_description: "Invalid or expired authorization code",
+        });
+      }
+
+      log("INFO", "[OAUTH_TOKEN] Authorization code validated", {
+        user_id: codeData.userId,
+        client_id: codeData.clientId,
+        redirect_uri: codeData.redirectUri,
       });
-    }
 
-    log("INFO", "[OAUTH_TOKEN] Authorization code validated", {
-      user_id: codeData.userId,
-      client_id: codeData.clientId,
-      redirect_uri: codeData.redirectUri,
-    });
+      if (codeData.redirectUri !== redirect_uri) {
+        log("WARN", "[OAUTH_TOKEN] Redirect URI mismatch", {
+          expected: codeData.redirectUri,
+          received: redirect_uri,
+        });
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "Redirect URI mismatch",
+        });
+      }
 
-    // Verify redirect URI matches
-    if (codeData.redirectUri !== redirect_uri) {
-      log("WARN", "[OAUTH_TOKEN] Redirect URI mismatch", {
-        expected: codeData.redirectUri,
-        received: redirect_uri,
+      log("INFO", "[OAUTH_TOKEN] Generating tokens", {
+        user_id: codeData.userId,
+        client_id: codeData.clientId,
+        scopes: codeData.scopes,
       });
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "Redirect URI mismatch",
+
+      const accessToken = generateAccessToken(
+        codeData.userId,
+        codeData.clientId,
+        codeData.scopes
+      );
+      const refreshToken = generateRefreshToken();
+
+      await storeAccessToken(
+        accessToken,
+        refreshToken,
+        codeData.apiKey,
+        codeData.userId,
+        codeData.clientId,
+        codeData.scopes
+      );
+
+      log("INFO", "[OAUTH_TOKEN] Tokens issued successfully", {
+        user_id: codeData.userId,
+        client_id: codeData.clientId,
+        access_token_preview: accessToken.substring(0, 20) + "...",
       });
-    }
 
-    // Generate access and refresh tokens
-    log("INFO", "[OAUTH_TOKEN] Generating tokens", {
-      user_id: codeData.userId,
-      client_id: codeData.clientId,
-      scopes: codeData.scopes,
-    });
-    
-    const accessToken = generateAccessToken(
-      codeData.userId,
-      codeData.clientId,
-      codeData.scopes
-    );
-    const refreshToken = generateRefreshToken();
-
-    // Store tokens with user's OpenRouter API key
-    storeAccessToken(
-      accessToken,
-      refreshToken,
-      codeData.apiKey, // User's OpenRouter API key
-      codeData.userId,
-      codeData.clientId,
-      codeData.scopes
-    );
-
-    log("INFO", "[OAUTH_TOKEN] Tokens issued successfully", {
-      user_id: codeData.userId,
-      client_id: codeData.clientId,
-      access_token_preview: accessToken.substring(0, 20) + "...",
-    });
-
-    return res.json({
-      access_token: accessToken,
-      token_type: "Bearer",
-      expires_in: 3600,
-      refresh_token: refreshToken,
-      scope: codeData.scopes.join(" "),
-    });
-  }
-
-  // Handle refresh token grant
-  if (grant_type === "refresh_token") {
-    if (!refresh_token) {
-      log("WARN", "[OAUTH_TOKEN] Missing refresh_token");
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "Missing refresh_token",
+      return res.json({
+        access_token: accessToken,
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: refreshToken,
+        scope: codeData.scopes.join(" "),
       });
     }
 
-    log("INFO", "[OAUTH_TOKEN] Processing refresh token grant", {
-      refresh_token: refresh_token.substring(0, 10) + "...",
-    });
+    if (grant_type === "refresh_token") {
+      if (!refresh_token) {
+        log("WARN", "[OAUTH_TOKEN] Missing refresh_token");
+        return res.status(400).json({
+          error: "invalid_request",
+          error_description: "Missing refresh_token",
+        });
+      }
 
-    const refreshData = getRefreshToken(refresh_token);
-    if (!refreshData) {
-      log("WARN", "[OAUTH_TOKEN] Invalid or expired refresh token");
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Invalid or expired refresh token",
+      log("INFO", "[OAUTH_TOKEN] Processing refresh token grant", {
+        refresh_token: refresh_token.substring(0, 10) + "...",
+      });
+
+      const refreshData = await getRefreshToken(refresh_token);
+      if (!refreshData) {
+        log("WARN", "[OAUTH_TOKEN] Invalid or expired refresh token");
+        return res.status(400).json({
+          error: "invalid_grant",
+          error_description: "Invalid or expired refresh token",
+        });
+      }
+
+      log("INFO", "[OAUTH_TOKEN] Refresh token validated", {
+        user_id: refreshData.userId,
+        client_id: refreshData.clientId,
+      });
+
+      const oldTokenData = await getAccessToken(refreshData.accessToken);
+      if (!oldTokenData) {
+        return res.status(400).json({
+          error: "invalid_grant",
+          error_description: "Associated access token not found",
+        });
+      }
+
+      const newAccessToken = generateAccessToken(
+        refreshData.userId,
+        refreshData.clientId,
+        refreshData.scopes
+      );
+      const newRefreshToken = generateRefreshToken();
+
+      await storeAccessToken(
+        newAccessToken,
+        newRefreshToken,
+        oldTokenData.apiKey,
+        refreshData.userId,
+        refreshData.clientId,
+        refreshData.scopes
+      );
+      await revokeRefreshToken(refresh_token);
+
+      return res.json({
+        access_token: newAccessToken,
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: newRefreshToken,
+        scope: refreshData.scopes.join(" "),
       });
     }
-
-    log("INFO", "[OAUTH_TOKEN] Refresh token validated", {
-      user_id: refreshData.userId,
-      client_id: refreshData.clientId,
-    });
-
-    // Get stored access token data to retrieve API key
-    const { getAccessToken } = require("../utils/tokenStorage");
-    const oldTokenData = getAccessToken(refreshData.accessToken);
-    if (!oldTokenData) {
-      return res.status(400).json({
-        error: "invalid_grant",
-        error_description: "Associated access token not found",
-      });
-    }
-
-    // Generate new tokens
-    const newAccessToken = generateAccessToken(
-      refreshData.userId,
-      refreshData.clientId,
-      refreshData.scopes
-    );
-    const newRefreshToken = generateRefreshToken();
-
-    // Store new tokens
-    storeAccessToken(
-      newAccessToken,
-      newRefreshToken,
-      oldTokenData.apiKey, // Use existing API key
-      refreshData.userId,
-      refreshData.clientId,
-      refreshData.scopes
-    );
-
-    // Revoke old refresh token
-    revokeRefreshToken(refresh_token);
-
-    return res.json({
-      access_token: newAccessToken,
-      token_type: "Bearer",
-      expires_in: 3600,
-      refresh_token: newRefreshToken,
-      scope: refreshData.scopes.join(" "),
-    });
-  }
 
     log("WARN", "[OAUTH_TOKEN] Unsupported grant type", { grant_type });
     return res.status(400).json({
       error: "unsupported_grant_type",
       error_description: `Grant type '${grant_type}' is not supported`,
     });
+  } catch (err) {
+    logError("OAUTH_TOKEN", err);
+    return res.status(500).json({
+      error: "server_error",
+      error_description: "Token request failed",
+    });
+  }
 });
 
 /**
  * POST /oauth/introspect
  * Token Introspection (RFC 7662)
  */
-router.post("/introspect", express.urlencoded({ extended: true }), express.json(), (req, res) => {
+router.post("/introspect", express.urlencoded({ extended: true }), express.json(), async (req, res) => {
   const { token, token_type_hint } = req.body;
 
   if (!token) {
@@ -642,8 +627,7 @@ router.post("/introspect", express.urlencoded({ extended: true }), express.json(
   }
 
   // Try as stored access token
-  const { getAccessToken } = require("../utils/tokenStorage");
-  const tokenData = getAccessToken(token);
+  const tokenData = await getAccessToken(token);
   if (tokenData) {
     return res.json({
       active: true,
@@ -654,7 +638,6 @@ router.post("/introspect", express.urlencoded({ extended: true }), express.json(
     });
   }
 
-  // Token not found or invalid
   return res.json({
     active: false,
   });
