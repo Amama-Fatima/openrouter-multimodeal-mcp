@@ -6,7 +6,9 @@
 const { getRedisClient, isRedisEnabled } = require("./redisClient");
 
 const STATE_TTL_SEC = 600; // 10 minutes
+const CALLBACK_DONE_TTL_SEC = 120; // 2 minutes - allow duplicate callback requests to get same redirect
 const KEY_PREFIX = "oauth:state:";
+const KEY_CALLBACK_DONE_PREFIX = "oauth:callback_done:";
 
 function authLog(level, message, data = {}) {
   const timestamp = new Date().toISOString();
@@ -157,9 +159,64 @@ async function deleteState(state) {
   });
 }
 
+/**
+ * Store successful callback redirect so duplicate requests (second tab, link preview) can re-use it.
+ * Only used when Redis is enabled (shared across replicas).
+ * @param {string} state - Same state that was consumed
+ * @param {Object} data - { redirectUri, authCode, clientState }
+ */
+async function setCallbackDone(state, data, ttlSec = CALLBACK_DONE_TTL_SEC) {
+  const preview = statePreview(state);
+  if (!isRedisEnabled()) return;
+  try {
+    const redis = await getRedisClient();
+    if (redis) {
+      await redis.set(KEY_CALLBACK_DONE_PREFIX + state, JSON.stringify(data), { EX: ttlSec });
+      authLog("INFO", "[AUTH_FLOW] Callback-done stored (Redis) for duplicate handling", {
+        operation: "set_callback_done",
+        state_preview: preview,
+        ttl_sec: ttlSec,
+      });
+    }
+  } catch (err) {
+    authLog("ERROR", "[AUTH_FLOW] setCallbackDone failed", {
+      state_preview: preview,
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * Get redirect data if this state was already successfully used (duplicate callback).
+ * @param {string} state - State from callback URL
+ * @returns {Promise<Object|null>} { redirectUri, authCode, clientState } or null
+ */
+async function getCallbackDone(state) {
+  if (!isRedisEnabled()) return null;
+  const preview = statePreview(state);
+  try {
+    const redis = await getRedisClient();
+    if (!redis) return null;
+    const raw = await redis.get(KEY_CALLBACK_DONE_PREFIX + state);
+    const found = !!raw;
+    if (found) {
+      authLog("INFO", "[AUTH_FLOW] Callback-done found (Redis) - replaying redirect for duplicate request", {
+        operation: "get_callback_done",
+        state_preview: preview,
+      });
+    }
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   setState,
   getState,
   deleteState,
+  setCallbackDone,
+  getCallbackDone,
   isRedisEnabled,
 };

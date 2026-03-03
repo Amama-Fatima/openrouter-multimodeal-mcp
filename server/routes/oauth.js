@@ -56,7 +56,7 @@ const {
   verifyAccessToken,
 } = require("../utils/jwt");
 const { registerClient, getClient, verifyClient } = require("../utils/clientRegistry");
-const { setState, getState, deleteState } = require("../utils/stateStore");
+const { setState, getState, deleteState, setCallbackDone, getCallbackDone } = require("../utils/stateStore");
 
 /**
  * OPTIONS /oauth/register
@@ -329,8 +329,20 @@ router.get("/openrouter-callback", async (req, res) => {
     state_preview: orState ? orState.substring(0, 12) + "..." : null,
   });
 
-  const authData = await getState(orState);
+  let authData = await getState(orState);
   if (!authData) {
+    // Duplicate request? (second tab, link preview, refresh) - re-issue same redirect if we have it
+    const callbackDone = await getCallbackDone(orState);
+    if (callbackDone) {
+      const replayUri = `${callbackDone.redirectUri}?code=${callbackDone.authCode}&state=${encodeURIComponent(callbackDone.clientState || "")}`;
+      log("INFO", "[AUTH_FLOW] Step: callback_duplicate_replay_redirect", {
+        flow_phase: "auth_flow",
+        step: "callback_replay_redirect",
+        state_preview: orState ? orState.substring(0, 12) + "..." : null,
+        reason: "duplicate_request_same_redirect",
+      });
+      return res.redirect(replayUri);
+    }
     log("WARN", "[AUTH_FLOW] Step: callback_state_missing", {
       flow_phase: "auth_flow",
       step: "callback_state_not_found",
@@ -396,13 +408,21 @@ router.get("/openrouter-callback", async (req, res) => {
       authData.scopes
     );
 
-    const redirectUri = `${authData.redirectUri}?code=${authCode}&state=${authData.state || ""}`;
+    const clientState = authData.state || "";
+    const redirectUri = `${authData.redirectUri}?code=${authCode}&state=${clientState}`;
     log("INFO", "[AUTH_FLOW] Step: callback_redirect_to_client", {
       flow_phase: "auth_flow",
       step: "callback_redirect",
       redirect_uri_preview: redirectUri.substring(0, 80) + "...",
       has_code: true,
       has_state: !!authData.state,
+    });
+
+    // Store so duplicate callback requests (second tab, link preview) get the same redirect
+    await setCallbackDone(orState, {
+      redirectUri: authData.redirectUri,
+      authCode,
+      clientState,
     });
 
     res.redirect(redirectUri);
