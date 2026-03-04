@@ -4,8 +4,9 @@
 const { getRedisClient, isRedisEnabled } = require("./redisClient");
 
 const CODE_TTL_SEC = 600;
-const ACCESS_TOKEN_TTL_SEC = 3600;
-const REFRESH_TOKEN_TTL_SEC = 86400 * 30;
+// Match JWT access token lifetime so Redis doesn't expire the key before the token
+const ACCESS_TOKEN_TTL_SEC = parseInt(process.env.ACCESS_TOKEN_EXPIRY) || 86400 * 7; // 7 days default
+const REFRESH_TOKEN_TTL_SEC = parseInt(process.env.REFRESH_TOKEN_EXPIRY) || 86400 * 30; // 30 days
 const KEY_CODE = "oauth:code:";
 const KEY_TOKEN = "oauth:token:";
 const KEY_REFRESH = "oauth:refresh:";

@@ -6,7 +6,8 @@ const crypto = require("crypto");
 // In production, use a secure secret from environment
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 const JWT_ISSUER = process.env.JWT_ISSUER || "openrouter-mcp-server";
-const ACCESS_TOKEN_EXPIRY = parseInt(process.env.ACCESS_TOKEN_EXPIRY) || 3600; // 1 hour
+// Default 7 days so team members aren't asked to re-authenticate multiple times per day
+const ACCESS_TOKEN_EXPIRY = parseInt(process.env.ACCESS_TOKEN_EXPIRY) || 86400 * 7; // 7 days
 const REFRESH_TOKEN_EXPIRY = parseInt(process.env.REFRESH_TOKEN_EXPIRY) || 86400 * 30; // 30 days
 
 /**

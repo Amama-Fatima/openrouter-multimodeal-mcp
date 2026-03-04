@@ -54,6 +54,7 @@ const {
   generateAccessToken,
   generateRefreshToken,
   verifyAccessToken,
+  ACCESS_TOKEN_EXPIRY,
 } = require("../utils/jwt");
 const { registerClient, getClient, verifyClient } = require("../utils/clientRegistry");
 const { setState, getState, deleteState, setCallbackDone, getCallbackDone } = require("../utils/stateStore");
@@ -578,7 +579,7 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
       return res.json({
         access_token: accessToken,
         token_type: "Bearer",
-        expires_in: 3600,
+        expires_in: ACCESS_TOKEN_EXPIRY,
         refresh_token: refreshToken,
         scope: codeData.scopes.join(" "),
       });
@@ -648,7 +649,7 @@ router.post("/token", express.urlencoded({ extended: true }), express.json(), as
       return res.json({
         access_token: newAccessToken,
         token_type: "Bearer",
-        expires_in: 3600,
+        expires_in: ACCESS_TOKEN_EXPIRY,
         refresh_token: newRefreshToken,
         scope: refreshData.scopes.join(" "),
       });

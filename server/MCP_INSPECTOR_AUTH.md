@@ -248,7 +248,7 @@ curl -X POST http://localhost:10000/{SECRET_PATH}/mcp \
 # OAuth Configuration
 JWT_SECRET=your-secret-key  # For JWT signing (auto-generated if not set)
 JWT_ISSUER=openrouter-mcp-server  # JWT issuer
-ACCESS_TOKEN_EXPIRY=3600  # Access token expiry in seconds
+ACCESS_TOKEN_EXPIRY=604800  # Access token expiry in seconds (default 7 days; set lower for stricter security)
 REFRESH_TOKEN_EXPIRY=2592000  # Refresh token expiry in seconds
 
 # Pre-configured Clients
